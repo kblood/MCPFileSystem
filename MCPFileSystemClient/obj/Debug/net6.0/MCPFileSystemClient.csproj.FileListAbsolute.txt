@@ -1,0 +1,14 @@
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\bin\Debug\net6.0\MCPFileSystemClient.exe
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\bin\Debug\net6.0\MCPFileSystemClient.deps.json
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\bin\Debug\net6.0\MCPFileSystemClient.runtimeconfig.json
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\bin\Debug\net6.0\MCPFileSystemClient.dll
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\bin\Debug\net6.0\MCPFileSystemClient.pdb
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\obj\Debug\net6.0\MCPFileSystemClient.GeneratedMSBuildEditorConfig.editorconfig
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\obj\Debug\net6.0\MCPFileSystemClient.AssemblyInfoInputs.cache
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\obj\Debug\net6.0\MCPFileSystemClient.AssemblyInfo.cs
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\obj\Debug\net6.0\MCPFileSystemClient.csproj.CoreCompileInputs.cache
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\obj\Debug\net6.0\MCPFileSystemClient.dll
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\obj\Debug\net6.0\refint\MCPFileSystemClient.dll
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\obj\Debug\net6.0\MCPFileSystemClient.pdb
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\obj\Debug\net6.0\MCPFileSystemClient.genruntimeconfig.cache
+C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemClient\obj\Debug\net6.0\ref\MCPFileSystemClient.dll

@@ -1,0 +1,22 @@
+{
+  "mcpServers": {
+    "mcpfilesystem": {
+      "command": "dotnet",
+      "args": [
+        "run",
+        "--project",
+        "C:/LLM/Projects/ClaudeTest/MCPFileSystem/MCPFileSystemServer",
+        "--",
+        "--root",
+        "C:/LLM/Projects/ClaudeTest"
+      ],
+      "alwaysAllow": [
+        "read_file",
+        "list_directory",
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories"
+      ]
+    }
+  }
+}

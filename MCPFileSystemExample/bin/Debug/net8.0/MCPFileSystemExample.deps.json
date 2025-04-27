@@ -1,0 +1,39 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "MCPFileSystemExample/1.0.0": {
+        "dependencies": {
+          "MCPFileSystemClient": "1.0.0"
+        },
+        "runtime": {
+          "MCPFileSystemExample.dll": {}
+        }
+      },
+      "MCPFileSystemClient/1.0.0": {
+        "runtime": {
+          "MCPFileSystemClient.dll": {
+            "assemblyVersion": "1.0.0",
+            "fileVersion": "1.0.0.0"
+          }
+        }
+      }
+    }
+  },
+  "libraries": {
+    "MCPFileSystemExample/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "MCPFileSystemClient/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}
