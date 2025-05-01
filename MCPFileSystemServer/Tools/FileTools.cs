@@ -29,16 +29,47 @@ public static class FileTools
     [Description("Lists all files in the specified directory.")]
     public static string ListFiles(
         [Description("Absolute path to the directory containing the files")]
-        string directoryPath) 
+        string directoryPath,
+        [Description("Whether to respect .gitignore rules")]
+        bool respectGitignore = true) 
     {
         try 
         {
-            var files = FileService.ListFiles(directoryPath);
+            var files = FileService.ListFiles(directoryPath, respectGitignore);
             if (files.Length > 0 && files[0].StartsWith("Error:")) 
             {
                 return JsonSerializer.Serialize(new { error = files[0] }, DefaultJsonOptions);
             }
             return JsonSerializer.Serialize(files, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
+
+    /// <summary>
+    /// Lists all files and directories within the specified directory with detailed information.
+    /// </summary>
+    /// <param name="directoryPath">Path to list contents of.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <returns>JSON string with directories and files in an efficient format.</returns>
+    [McpServerTool("list_contents")]
+    [Description("Lists all files and directories within the specified directory with detailed information.")]
+    public static string ListContents(
+        [Description("Path to list contents of")]
+        string directoryPath,
+        [Description("Whether to respect .gitignore rules")]
+        bool respectGitignore = true)
+    {
+        try 
+        {
+            var contents = FileService.ListDirectoryContents(directoryPath, respectGitignore);
+            if (contents.Length > 0 && contents[0].StartsWith("Error:")) 
+            {
+                return JsonSerializer.Serialize(new { error = contents[0] }, DefaultJsonOptions);
+            }
+            return JsonSerializer.Serialize(contents, DefaultJsonOptions);
         }
         catch (Exception ex)
         {
@@ -122,8 +153,10 @@ public static class FileTools
     [Description("Get a detailed listing of all files and directories in a specified path.")]
     public static string ListDirectory(
         [Description("Path to list contents of")]
-        string path) =>
-        JsonSerializer.Serialize(FileService.ListDirectories(path).Concat(FileService.ListFiles(path)).ToArray(), DefaultJsonOptions);
+        string path,
+        [Description("Whether to respect .gitignore rules")]
+        bool respectGitignore = true) =>
+        JsonSerializer.Serialize(FileService.ListDirectories(path, respectGitignore).Concat(FileService.ListFiles(path, respectGitignore)).ToArray(), DefaultJsonOptions);
 
     /// <summary>
     /// Get a recursive tree view of files and directories as a JSON structure.
@@ -134,8 +167,10 @@ public static class FileTools
     [Description("Get a recursive tree view of files and directories as a JSON structure.")]
     public static string DirectoryTree(
         [Description("Path to the root directory")]
-        string path) =>
-        JsonSerializer.Serialize(FileService.GetDirectoryTree(path), DefaultJsonOptions);
+        string path,
+        [Description("Whether to respect .gitignore rules")]
+        bool respectGitignore = true) =>
+        JsonSerializer.Serialize(FileService.GetDirectoryTree(path, respectGitignore), DefaultJsonOptions);
 
     /// <summary>
     /// Move or rename files and directories.
@@ -153,6 +188,75 @@ public static class FileTools
         FileService.MoveFile(source, destination);
 
     /// <summary>
+    /// Copies a file to a new location.
+    /// </summary>
+    /// <param name="source">Source file path.</param>
+    /// <param name="destination">Destination file path.</param>
+    /// <param name="overwrite">Whether to overwrite an existing file.</param>
+    /// <returns>Success or error message.</returns>
+    [McpServerTool("copy_file")]
+    [Description("Copies a file to a new location.")]
+    public static string CopyFile(
+        [Description("Source file path")]
+        string source,
+        [Description("Destination file path")]
+        string destination,
+        [Description("Whether to overwrite an existing file (default: false)")]
+        bool overwrite = false) =>
+        FileService.CopyFile(source, destination, overwrite);
+
+    /// <summary>
+    /// Copies a directory and its contents to a new location.
+    /// </summary>
+    /// <param name="source">Source directory path.</param>
+    /// <param name="destination">Destination directory path.</param>
+    /// <param name="overwrite">Whether to overwrite existing files.</param>
+    /// <param name="recursive">Whether to copy subdirectories.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <returns>Success or error message.</returns>
+    [McpServerTool("copy_directory")]
+    [Description("Copies a directory and its contents to a new location.")]
+    public static string CopyDirectory(
+        [Description("Source directory path")]
+        string source,
+        [Description("Destination directory path")]
+        string destination,
+        [Description("Whether to overwrite existing files (default: false)")]
+        bool overwrite = false,
+        [Description("Whether to copy subdirectories (default: true)")]
+        bool recursive = true,
+        [Description("Whether to respect .gitignore rules (default: true)")]
+        bool respectGitignore = true) =>
+        FileService.CopyDirectory(source, destination, overwrite, recursive, respectGitignore);
+
+    /// <summary>
+    /// Copies files matching a pattern from source directory to destination directory.
+    /// </summary>
+    /// <param name="sourceDir">Source directory path.</param>
+    /// <param name="destinationDir">Destination directory path.</param>
+    /// <param name="pattern">File pattern to match (e.g., "*.exe", "data.*").</param>
+    /// <param name="recursive">Whether to search subdirectories recursively.</param>
+    /// <param name="overwrite">Whether to overwrite existing files.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <returns>Success message with statistics or error message.</returns>
+    [McpServerTool("copy_files_with_pattern")]
+    [Description("Copies files matching a pattern from source directory to destination directory.")]
+    public static string CopyFilesWithPattern(
+        [Description("Source directory path")]
+        string sourceDir,
+        [Description("Destination directory path")]
+        string destinationDir,
+        [Description("File pattern to match (e.g., '*.exe', 'data.*')")]
+        string pattern = "*.*",
+        [Description("Whether to search subdirectories recursively (default: false)")]
+        bool recursive = false,
+        [Description("Whether to overwrite existing files (default: false)")]
+        bool overwrite = false,
+        [Description("Whether to respect .gitignore rules (default: true)")]
+        bool respectGitignore = true) =>
+        FileService.CopyFilesWithPattern(sourceDir, destinationDir, pattern, recursive, overwrite, respectGitignore);
+
+    /// <summary>
     /// Recursively search for files and directories matching a pattern.
     /// </summary>
     /// <param name="path">Starting path for the search.</param>
@@ -167,8 +271,10 @@ public static class FileTools
         [Description("Search pattern")]
         string pattern,
         [Description("Optional patterns to exclude")]
-        string[] excludePatterns = null) =>
-        JsonSerializer.Serialize(SearchService.SearchFiles(path, pattern, excludePatterns), DefaultJsonOptions);
+        string[] excludePatterns = null,
+        [Description("Whether to respect .gitignore rules")]
+        bool respectGitignore = true) =>
+        JsonSerializer.Serialize(SearchService.SearchFiles(path, pattern, excludePatterns, respectGitignore), DefaultJsonOptions);
 
     /// <summary>
     /// Retrieve detailed metadata about a file or directory.
@@ -244,7 +350,7 @@ public static class FileTools
     [McpServerTool("list_projects")]
     [Description("Scans the current solution and returns all .csproj files found.")]
     public static string ListProjects() => 
-        JsonSerializer.Serialize(FileService.ListProjects(), DefaultJsonOptions);
+        JsonSerializer.Serialize(CodeAnalysisService.ListProjects(), DefaultJsonOptions);
 
     /// <summary>
     /// Searches a specific directory for .csproj files.
@@ -256,7 +362,7 @@ public static class FileTools
     public static string ListProjectsInDirectory(
         [Description("Absolute path to the directory to search for .csproj files")]
         string directory) => 
-        JsonSerializer.Serialize(FileService.ListProjectsInDirectory(directory), DefaultJsonOptions);
+        JsonSerializer.Serialize(CodeAnalysisService.ListProjectsInDirectory(directory), DefaultJsonOptions);
 
     /// <summary>
     /// Returns all .sln files found in the base directory.
@@ -265,7 +371,7 @@ public static class FileTools
     [McpServerTool("list_solutions")]
     [Description("Returns all .sln files found in the base directory.")]
     public static string ListSolutions() => 
-        JsonSerializer.Serialize(FileService.ListSolutions(), DefaultJsonOptions);
+        JsonSerializer.Serialize(CodeAnalysisService.ListSolutions(), DefaultJsonOptions);
 
     /// <summary>
     /// Lists all source files in a project directory.
@@ -277,7 +383,7 @@ public static class FileTools
     public static string ListSourceFiles(
         [Description("Absolute path to the project directory to scan for source files")]
         string projectDir) => 
-        JsonSerializer.Serialize(FileService.ListSourceFiles(projectDir), DefaultJsonOptions);
+        JsonSerializer.Serialize(CodeAnalysisService.ListSourceFiles(projectDir), DefaultJsonOptions);
 
     /// <summary>
     /// Performs a text-based search across all code files for the specified text.
@@ -297,11 +403,13 @@ public static class FileTools
         [Description("File pattern to filter by (e.g., '*.cs', defaults to '*.*')")]
         string filePattern = "*.*",
         [Description("Whether to search subdirectories (default: true)")]
-        bool recursive = true)
+        bool recursive = true,
+        [Description("Whether to respect .gitignore rules (default: true)")]
+        bool respectGitignore = true)
     {
         try
         {
-            var results = SearchService.SearchTextInFiles(directory, searchText, filePattern, recursive);
+            var results = SearchService.SearchTextInFiles(directory, searchText, filePattern, recursive, respectGitignore);
             
             // Check if there's an error
             if (results.ContainsKey("error"))
@@ -347,11 +455,13 @@ public static class FileTools
         [Description("Whether to search subdirectories (default: true)")]
         bool recursive = true,
         [Description("Perform a dry run without making changes (default: false)")]
-        bool dryRun = false)
+        bool dryRun = false,
+        [Description("Whether to respect .gitignore rules (default: true)")]
+        bool respectGitignore = true)
     {
         try
         {
-            var results = SearchService.SearchAndReplaceInFiles(directory, searchText, replaceText, filePattern, recursive, dryRun);
+            var results = SearchService.SearchAndReplaceInFiles(directory, searchText, replaceText, filePattern, recursive, dryRun, respectGitignore);
             
             // Check if there's an error
             if (results.ContainsKey("error"))
@@ -422,5 +532,27 @@ public static class FileTools
         {
             return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
         }
+    }
+
+    /// <summary>
+    /// Formats a file size in bytes to a human-readable string.
+    /// </summary>
+    /// <param name="sizeInBytes">Size in bytes.</param>
+    /// <returns>Formatted file size (e.g., "1.5 MB", "500 KB").</returns>
+    public static string GetFileSize(long sizeInBytes)
+    {
+        const long KB = 1024;
+        const long MB = KB * 1024;
+        const long GB = MB * 1024;
+        const long TB = GB * 1024;
+
+        return sizeInBytes switch
+        {
+            < KB => $"{sizeInBytes} B",
+            < MB => $"{Math.Round((double)sizeInBytes / KB, 1)} KB",
+            < GB => $"{Math.Round((double)sizeInBytes / MB, 1)} MB",
+            < TB => $"{Math.Round((double)sizeInBytes / GB, 1)} GB",
+            _ => $"{Math.Round((double)sizeInBytes / TB, 1)} TB"
+        };
     }
 }

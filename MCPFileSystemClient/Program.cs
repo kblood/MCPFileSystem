@@ -24,7 +24,7 @@ namespace MCPFileSystem.Client
             _port = port;
         }
 
-        private async Task<string> SendMCPRequestAsync(string command, string data = null)
+        private async Task<string> SendMCPRequestAsync(string command, string? data = null)
         {
             try
             {
@@ -119,23 +119,24 @@ namespace MCPFileSystem.Client
             
             var parts = response.Split(' ', 2);
             string status = parts[0];
-            string data = parts.Length > 1 ? parts[1] : null;
+            string? data = parts.Length > 1 ? parts[1] : string.Empty;
             
             Console.WriteLine($"Parsed response - Status: {status}, Data: {(data?.Length > 100 ? data.Substring(0, 100) + "..." : data)}");
             
             return new MCPResponse
             {
                 IsSuccess = status == "ok",
-                Data = data
+                Data = data ?? string.Empty
             };
         }
 
-        public async Task<List<FileSystemEntry>> ListDirectoryAsync(string path)
+        public async Task<List<FileSystemEntry>> ListDirectoryAsync(string path, bool respectGitignore = true)
         {
             try
             {
-                Console.WriteLine($"ListDirectoryAsync: {path}");
-                var response = await SendMCPRequestAsync("list", path);
+                Console.WriteLine($"ListDirectoryAsync: {path}, respectGitignore: {respectGitignore}");
+                var parameters = JsonSerializer.Serialize(new { path, respectGitignore });
+                var response = await SendMCPRequestAsync("list", parameters);
                 var parsedResponse = ParseResponse(response);
                 
                 if (!parsedResponse.IsSuccess)
@@ -199,16 +200,20 @@ namespace MCPFileSystem.Client
                     };
                     
                     var result = JsonSerializer.Deserialize<ReadFileResponse>(parsedResponse.Data, options);
+                    if (result == null)
+                    {
+                        return string.Empty;
+                    }
                     
                     // Handle different encodings
-                    if (result.Encoding == "base64")
+                    if (result.Encoding == "base64" && !string.IsNullOrEmpty(result.Content))
                     {
                         Console.WriteLine("Decoding base64 content...");
                         byte[] bytes = Convert.FromBase64String(result.Content);
                         return Encoding.UTF8.GetString(bytes);
                     }
                     
-                    return result.Content;
+                    return result.Content ?? string.Empty;
                 }
                 catch (JsonException je)
                 {
@@ -310,7 +315,8 @@ namespace MCPFileSystem.Client
                         PropertyNameCaseInsensitive = true
                     };
                     
-                    return JsonSerializer.Deserialize<PathInfo>(parsedResponse.Data, options);
+                    return JsonSerializer.Deserialize<PathInfo>(parsedResponse.Data, options) 
+                        ?? new PathInfo { Exists = false, Type = "none" };
                 }
                 catch (JsonException je)
                 {
@@ -353,7 +359,8 @@ namespace MCPFileSystem.Client
                         PropertyNameCaseInsensitive = true
                     };
                     
-                    return JsonSerializer.Deserialize<FileSystemInfo>(parsedResponse.Data, options);
+                    return JsonSerializer.Deserialize<FileSystemInfo>(parsedResponse.Data, options) 
+                        ?? new FileSystemInfo();
                 }
                 catch (JsonException je)
                 {
@@ -368,12 +375,245 @@ namespace MCPFileSystem.Client
                 throw;
             }
         }
+        
+        /// <summary>
+        /// Gets a hierarchical tree representation of a directory and its contents
+        /// </summary>
+        /// <param name="path">Path to get the directory tree for</param>
+        /// <param name="respectGitignore">Whether to respect .gitignore rules</param>
+        /// <param name="showHidden">Whether to include hidden files and directories</param>
+        /// <param name="includeGitFolders">Whether to include .git folders</param>
+        /// <returns>A tree structure representing the directory</returns>
+        public async Task<DirectoryTreeNode> GetDirectoryTreeAsync(string path, bool respectGitignore = true, bool showHidden = false, bool includeGitFolders = false)
+        {
+            try
+            {
+                Console.WriteLine($"GetDirectoryTreeAsync: {path}, respectGitignore: {respectGitignore}, showHidden: {showHidden}, includeGitFolders: {includeGitFolders}");
+                var parameters = JsonSerializer.Serialize(new { path, respectGitignore, showHidden, includeGitFolders });
+                var response = await SendMCPRequestAsync("tree", parameters);
+                var parsedResponse = ParseResponse(response);
+                
+                if (!parsedResponse.IsSuccess)
+                {
+                    throw new Exception($"Failed to get directory tree: {parsedResponse.Data}");
+                }
+                
+                if (string.IsNullOrEmpty(parsedResponse.Data))
+                {
+                    Console.WriteLine("WARNING: Empty data in response for GetDirectoryTreeAsync");
+                    // Return a root node with the requested path as name
+                    return new DirectoryTreeNode 
+                    { 
+                        Name = Path.GetFileName(path) ?? path,
+                        Type = "directory"
+                    };
+                }
+                
+                try
+                {
+                    var options = new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    };
+                    
+                    return JsonSerializer.Deserialize<DirectoryTreeNode>(parsedResponse.Data, options) 
+                        ?? new DirectoryTreeNode 
+                        { 
+                            Name = Path.GetFileName(path) ?? path,
+                            Type = "directory"
+                        };
+                }
+                catch (JsonException je)
+                {
+                    Console.WriteLine($"JSON Error: {je.Message}");
+                    Console.WriteLine($"JSON Data: {parsedResponse.Data}");
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in GetDirectoryTreeAsync: {ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
+        }
+        
+        /// <summary>
+        /// Searches for files matching the given pattern
+        /// </summary>
+        /// <param name="path">Path to search in</param>
+        /// <param name="pattern">Search pattern</param>
+        /// <returns>List of matching search results</returns>
+        public async Task<List<SearchResult>> SearchFilesAsync(string path, string pattern)
+        {
+            try
+            {
+                Console.WriteLine($"SearchFilesAsync: {path}, pattern: {pattern}");
+                var parameters = JsonSerializer.Serialize(new { path, pattern });
+                var response = await SendMCPRequestAsync("search", parameters);
+                var parsedResponse = ParseResponse(response);
+                
+                if (!parsedResponse.IsSuccess)
+                {
+                    throw new Exception($"Failed to search files: {parsedResponse.Data}");
+                }
+                
+                if (string.IsNullOrEmpty(parsedResponse.Data))
+                {
+                    Console.WriteLine("WARNING: Empty data in response for SearchFilesAsync");
+                    return new List<SearchResult>();
+                }
+                
+                try
+                {
+                    var options = new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    };
+                    
+                    return JsonSerializer.Deserialize<List<SearchResult>>(parsedResponse.Data, options) ?? new List<SearchResult>();
+                }
+                catch (JsonException je)
+                {
+                    Console.WriteLine($"JSON Error: {je.Message}");
+                    Console.WriteLine($"JSON Data: {parsedResponse.Data}");
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in SearchFilesAsync: {ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
+        }
+        
+        /// <summary>
+        /// Moves or renames a file or directory
+        /// </summary>
+        /// <param name="source">Source path</param>
+        /// <param name="destination">Destination path</param>
+        public async Task MoveFileAsync(string source, string destination)
+        {
+            try
+            {
+                Console.WriteLine($"MoveFileAsync: {source} to {destination}");
+                var parameters = JsonSerializer.Serialize(new { source, destination });
+                var response = await SendMCPRequestAsync("move", parameters);
+                var parsedResponse = ParseResponse(response);
+                
+                if (!parsedResponse.IsSuccess)
+                {
+                    throw new Exception($"Failed to move file: {parsedResponse.Data}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in MoveFileAsync: {ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
+        }
+        
+        /// <summary>
+        /// Edits a file by applying a series of text replacements
+        /// </summary>
+        /// <param name="path">Path to the file to edit</param>
+        /// <param name="operations">List of edit operations to perform</param>
+        /// <returns>Result of the edit operation</returns>
+        public async Task<EditResult> EditFileAsync(string path, List<EditOperation> operations)
+        {
+            try
+            {
+                Console.WriteLine($"EditFileAsync: {path}, {operations.Count} operations");
+                var parameters = JsonSerializer.Serialize(new { path, operations });
+                var response = await SendMCPRequestAsync("edit", parameters);
+                var parsedResponse = ParseResponse(response);
+                
+                if (!parsedResponse.IsSuccess)
+                {
+                    throw new Exception($"Failed to edit file: {parsedResponse.Data}");
+                }
+                
+                if (string.IsNullOrEmpty(parsedResponse.Data))
+                {
+                    Console.WriteLine("WARNING: Empty data in response for EditFileAsync");
+                    return new EditResult { EditCount = 0, Diff = "No changes" };
+                }
+                
+                try
+                {
+                    var options = new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    };
+                    
+                    return JsonSerializer.Deserialize<EditResult>(parsedResponse.Data, options) 
+                        ?? new EditResult { EditCount = 0, Diff = "Failed to parse response" };
+                }
+                catch (JsonException je)
+                {
+                    Console.WriteLine($"JSON Error: {je.Message}");
+                    Console.WriteLine($"JSON Data: {parsedResponse.Data}");
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in EditFileAsync: {ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
+        }
+        
+        /// <summary>
+        /// Lists all directories accessible by the server
+        /// </summary>
+        /// <returns>List of accessible directories</returns>
+        public async Task<List<DirectoryInfo>> ListAccessibleDirectoriesAsync()
+        {
+            try
+            {
+                Console.WriteLine("ListAccessibleDirectoriesAsync");
+                var response = await SendMCPRequestAsync("dirs");
+                var parsedResponse = ParseResponse(response);
+                
+                if (!parsedResponse.IsSuccess)
+                {
+                    throw new Exception($"Failed to list directories: {parsedResponse.Data}");
+                }
+                
+                if (string.IsNullOrEmpty(parsedResponse.Data))
+                {
+                    Console.WriteLine("WARNING: Empty data in response for ListAccessibleDirectoriesAsync");
+                    return new List<DirectoryInfo>();
+                }
+                
+                try
+                {
+                    var options = new JsonSerializerOptions
+                    {
+                        PropertyNameCaseInsensitive = true
+                    };
+                    
+                    return JsonSerializer.Deserialize<List<DirectoryInfo>>(parsedResponse.Data, options) 
+                        ?? new List<DirectoryInfo>();
+                }
+                catch (JsonException je)
+                {
+                    Console.WriteLine($"JSON Error: {je.Message}");
+                    Console.WriteLine($"JSON Data: {parsedResponse.Data}");
+                    throw;
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in ListAccessibleDirectoriesAsync: {ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
+        }
     }
 
     public class MCPResponse
     {
         public bool IsSuccess { get; set; }
-        public string Data { get; set; }
+        public string Data { get; set; } = string.Empty;
     }
 
     public class FileSystemEntry
@@ -412,6 +652,37 @@ namespace MCPFileSystem.Client
         public string? Attributes { get; set; }
     }
 
+    public class DirectoryTreeNode
+    {
+        public string Name { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+        public long? Size { get; set; }
+        public List<DirectoryTreeNode> Children { get; set; }
+        
+        public DirectoryTreeNode()
+        {
+            Children = new List<DirectoryTreeNode>();
+        }
+    }
+
+    public class EditOperation
+    {
+        public string OldText { get; set; } = string.Empty;
+        public string NewText { get; set; } = string.Empty;
+    }
+
+    public class EditResult
+    {
+        public int EditCount { get; set; }
+        public string Diff { get; set; } = string.Empty;
+    }
+
+    public class SearchResult
+    {
+        public string Path { get; set; } = string.Empty;
+        public string Type { get; set; } = string.Empty;
+    }
+
     class Program
     {
         static async Task Main(string[] args)
@@ -446,7 +717,7 @@ namespace MCPFileSystem.Client
             while (running)
             {
                 Console.Write("> ");
-                string input = Console.ReadLine();
+                string? input = Console.ReadLine();
                 
                 if (string.IsNullOrWhiteSpace(input))
                     continue;
@@ -468,8 +739,18 @@ namespace MCPFileSystem.Client
                             break;
                         
                         case "ls":
-                            var entries = await client.ListDirectoryAsync(arg);
-                            Console.WriteLine($"Directory listing for: {arg}");
+                            bool respectGitignore = true;
+                            string path = arg;
+                            
+                            // Check if we have the --no-ignore flag
+                            if (path.Contains("--no-ignore"))
+                            {
+                                respectGitignore = false;
+                                path = path.Replace("--no-ignore", "").Trim();
+                            }
+                            
+                            var entries = await client.ListDirectoryAsync(path, respectGitignore);
+                            Console.WriteLine($"Directory listing for: {path}" + (respectGitignore ? " (respecting .gitignore)" : " (ignoring .gitignore)"));
                             Console.WriteLine("--------------------------------------------------");
                             foreach (var entry in entries)
                             {
@@ -494,7 +775,7 @@ namespace MCPFileSystem.Client
                         case "write":
                             Console.WriteLine("Enter file content (press Ctrl+Z on a new line when done):");
                             var sb = new StringBuilder();
-                            string line;
+                            string? line;
                             while ((line = Console.ReadLine()) != null)
                             {
                                 sb.AppendLine(line);
@@ -539,8 +820,36 @@ namespace MCPFileSystem.Client
                             break;
                             
                         case "tree":
-                            var tree = await client.GetDirectoryTreeAsync(arg);
-                            Console.WriteLine($"Directory tree for {arg}:");
+                            bool treeRespectGitignore = true;
+                            bool showHidden = false;
+                            bool includeGitFolders = false;
+                            string treePath = arg;
+                            
+                            // Process command line flags
+                            if (treePath.Contains("--no-ignore"))
+                            {
+                                treeRespectGitignore = false;
+                                treePath = treePath.Replace("--no-ignore", "").Trim();
+                            }
+                            
+                            if (treePath.Contains("--show-hidden"))
+                            {
+                                showHidden = true;
+                                treePath = treePath.Replace("--show-hidden", "").Trim();
+                            }
+                            
+                            if (treePath.Contains("--show-git"))
+                            {
+                                includeGitFolders = true;
+                                treePath = treePath.Replace("--show-git", "").Trim();
+                            }
+                            
+                            var tree = await client.GetDirectoryTreeAsync(treePath, treeRespectGitignore, showHidden, includeGitFolders);
+                            Console.WriteLine($"Directory tree for {treePath}:");
+                            if (!treeRespectGitignore) Console.WriteLine("  (ignoring .gitignore)");
+                            if (showHidden) Console.WriteLine("  (showing hidden files)");
+                            if (includeGitFolders) Console.WriteLine("  (showing .git folders)");
+                            
                             PrintDirectoryTree(tree, 0);
                             break;
                             
@@ -643,7 +952,10 @@ namespace MCPFileSystem.Client
             Console.WriteLine("  rmdir <path>         - Delete a directory");
             Console.WriteLine("  exists <path>        - Check if a path exists");
             Console.WriteLine("  info <path>          - Get file or directory information");
-            Console.WriteLine("  tree [path]          - Show directory tree");
+            Console.WriteLine("  tree [path] [flags]  - Show directory tree");
+            Console.WriteLine("    Flags: --no-ignore    - Don't respect .gitignore");
+            Console.WriteLine("           --show-hidden  - Show hidden files");
+            Console.WriteLine("           --show-git     - Show .git folders");
             Console.WriteLine("  search <path> <pat>  - Search for files matching pattern");
             Console.WriteLine("  move <src> <dst>     - Move/rename file or directory");
             Console.WriteLine("  edit <path> <o>:<n>  - Edit file (replace old:new text)");

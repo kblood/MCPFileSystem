@@ -1,4 +1,11 @@
 using System.Text;
+using System.IO;
+using System;
+using System.Linq;
+using System.Collections.Generic;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 
 namespace MCPFileSystemServer.Services;
 
@@ -7,6 +14,103 @@ namespace MCPFileSystemServer.Services;
 /// </summary>
 public static class CodeAnalysisService
 {
+
+/// <summary>
+    /// Lists all .csproj files in the base directory.
+    /// </summary>
+    /// <returns>An array of .csproj file paths.</returns>
+    public static string[] ListProjects()
+    {
+        try
+        {
+            var baseDir = FileValidationService.BaseDirectory;
+            return Directory.GetFiles(baseDir, "*.csproj", SearchOption.AllDirectories);
+        }
+        catch (Exception ex)
+        {
+            return new[] { $"Error: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
+    /// Lists all .csproj files in the specified directory.
+    /// </summary>
+    /// <param name="directory">The directory to search in.</param>
+    /// <returns>An array of .csproj file paths.</returns>
+    public static string[] ListProjectsInDirectory(string directory)
+    {
+        try
+        {
+            var normalizedPath = FileValidationService.NormalizePath(directory);
+
+            if (!Directory.Exists(normalizedPath))
+            {
+                return new[] { $"Error: Directory not found: {directory}" };
+            }
+
+            return Directory.GetFiles(normalizedPath, "*.csproj", SearchOption.AllDirectories);
+        }
+        catch (Exception ex)
+        {
+            return new[] { $"Error: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
+    /// Lists all .sln files in the base directory.
+    /// </summary>
+    /// <returns>An array of .sln file paths.</returns>
+    public static string[] ListSolutions()
+    {
+        try
+        {
+            var baseDir = FileValidationService.BaseDirectory;
+            return Directory.GetFiles(baseDir, "*.sln", SearchOption.AllDirectories);
+        }
+        catch (Exception ex)
+        {
+            return new[] { $"Error: {ex.Message}" };
+        }
+    }
+
+    /// <summary>
+    /// Lists all source files in a project directory.
+    /// </summary>
+    /// <param name="projectDir">The project directory to search in.</param>
+    /// <returns>An array of source file paths.</returns>
+    public static string[] ListSourceFiles(string projectDir)
+    {
+        try
+        {
+            var normalizedPath = FileValidationService.NormalizePath(projectDir);
+
+            if (!Directory.Exists(normalizedPath))
+            {
+                return new[] { $"Error: Directory not found: {projectDir}" };
+            }
+
+            // Common source file extensions
+            var extensions = new[] { "*.cs", "*.vb", "*.fs", "*.ts", "*.js", "*.html", "*.css", "*.sql", "*.json", "*.xml" };
+            var files = new List<string>();
+
+            foreach (var extension in extensions)
+            {
+                files.AddRange(Directory.GetFiles(normalizedPath, extension, SearchOption.AllDirectories));
+            }
+
+            // Filter out common binary folders
+            var result = files.Where(f => !f.Contains("\\bin\\") && 
+                                         !f.Contains("\\obj\\") && 
+                                         !f.Contains("\\node_modules\\")).ToArray();
+
+            return result;
+        }
+        catch (Exception ex)
+        {
+            return new[] { $"Error: {ex.Message}" };
+        }
+    }
+
     /// <summary>
     /// Extracts an outline of classes, methods, and properties from C# code files using Roslyn.
     /// </summary>
@@ -51,7 +155,8 @@ public static class CodeAnalysisService
 
             // Extract using directives
             var usings = root.Usings
-                .Select(u => u.Name.ToString())
+                .Select(u => u.Name?.ToString() ?? string.Empty)
+                .Where(u => !string.IsNullOrEmpty(u))
                 .ToList();
 
             if (usings.Count > 0)
@@ -215,14 +320,17 @@ public static class CodeAnalysisService
                     foreach (var cls in classes)
                     {
                         // Update type count
-                        string typeKind = cls.TryGetValue("type", out var typeObj) ? typeObj.ToString() : "class";
-                        switch (typeKind.ToLower())
+                        string typeKind = cls.TryGetValue("type", out var typeObj) ? typeObj?.ToString() ?? "class" : "class";
+                        if (!string.IsNullOrEmpty(typeKind))
                         {
-                            case "class": summary["classes"]++; break;
-                            case "interface": summary["interfaces"]++; break;
-                            case "struct": summary["structs"]++; break;
-                            case "enum": summary["enums"]++; break;
-                            case "record": summary["records"]++; break;
+                            switch (typeKind.ToLowerInvariant())
+                            {
+                                case "class": summary["classes"]++; break;
+                                case "interface": summary["interfaces"]++; break;
+                                case "struct": summary["structs"]++; break;
+                                case "enum": summary["enums"]++; break;
+                                case "record": summary["records"]++; break;
+                            }
                         }
 
                         // Update member counts
@@ -230,13 +338,16 @@ public static class CodeAnalysisService
                         {
                             foreach (var member in members)
                             {
-                                string memberKind = member.TryGetValue("kind", out var kindObj) ? kindObj.ToString() : "";
-                                switch (memberKind.ToLower())
+                                string memberKind = member.TryGetValue("kind", out var kindObj) ? kindObj?.ToString() ?? "" : "";
+                                if (!string.IsNullOrEmpty(memberKind))
                                 {
-                                    case "method": summary["methods"]++; break;
-                                    case "property": summary["properties"]++; break;
-                                    case "field": summary["fields"]++; break;
-                                    // Nested types and other members are counted separately
+                                    switch (memberKind.ToLowerInvariant())
+                                    {
+                                        case "method": summary["methods"]++; break;
+                                        case "property": summary["properties"]++; break;
+                                        case "field": summary["fields"]++; break;
+                                        // Nested types and other members are counted separately
+                                    }
                                 }
 
                                 // If this is a nested type, recursively count its members
@@ -244,25 +355,31 @@ public static class CodeAnalysisService
                                     nestedMembersObj is List<Dictionary<string, object>> nestedMembers)
                                 {
                                     // Update nested type count
-                                    string nestedTypeKind = member.TryGetValue("type", out var nestedTypeObj) ? nestedTypeObj.ToString() : "class";
-                                    switch (nestedTypeKind.ToLower())
+                                    string nestedTypeKind = member.TryGetValue("type", out var nestedTypeObj) ? nestedTypeObj?.ToString() ?? "class" : "class";
+                                    if (!string.IsNullOrEmpty(nestedTypeKind))
                                     {
-                                        case "class": summary["classes"]++; break;
-                                        case "interface": summary["interfaces"]++; break;
-                                        case "struct": summary["structs"]++; break;
-                                        case "enum": summary["enums"]++; break;
-                                        case "record": summary["records"]++; break;
+                                        switch (nestedTypeKind.ToLowerInvariant())
+                                        {
+                                            case "class": summary["classes"]++; break;
+                                            case "interface": summary["interfaces"]++; break;
+                                            case "struct": summary["structs"]++; break;
+                                            case "enum": summary["enums"]++; break;
+                                            case "record": summary["records"]++; break;
+                                        }
                                     }
 
                                     // Count nested type's members
                                     foreach (var nestedMember in nestedMembers)
                                     {
-                                        string nestedMemberKind = nestedMember.TryGetValue("kind", out var nestedKindObj) ? nestedKindObj.ToString() : "";
-                                        switch (nestedMemberKind.ToLower())
+                                        string nestedMemberKind = nestedMember.TryGetValue("kind", out var nestedKindObj) ? nestedKindObj?.ToString() ?? "" : "";
+                                        if (!string.IsNullOrEmpty(nestedMemberKind))
                                         {
-                                            case "method": summary["methods"]++; break;
-                                            case "property": summary["properties"]++; break;
-                                            case "field": summary["fields"]++; break;
+                                            switch (nestedMemberKind.ToLowerInvariant())
+                                            {
+                                                case "method": summary["methods"]++; break;
+                                                case "property": summary["properties"]++; break;
+                                                case "field": summary["fields"]++; break;
+                                            }
                                         }
                                     }
                                 }
@@ -279,14 +396,17 @@ public static class CodeAnalysisService
             foreach (var type in globalTypes)
             {
                 // Update type count
-                string typeKind = type.TryGetValue("type", out var typeObj) ? typeObj.ToString() : "class";
-                switch (typeKind.ToLower())
+                string typeKind = type.TryGetValue("type", out var typeObj) ? typeObj?.ToString() ?? "class" : "class";
+                if (!string.IsNullOrEmpty(typeKind))
                 {
-                    case "class": summary["classes"]++; break;
-                    case "interface": summary["interfaces"]++; break;
-                    case "struct": summary["structs"]++; break;
-                    case "enum": summary["enums"]++; break;
-                    case "record": summary["records"]++; break;
+                    switch (typeKind.ToLowerInvariant())
+                    {
+                        case "class": summary["classes"]++; break;
+                        case "interface": summary["interfaces"]++; break;
+                        case "struct": summary["structs"]++; break;
+                        case "enum": summary["enums"]++; break;
+                        case "record": summary["records"]++; break;
+                    }
                 }
 
                 // Update member counts
@@ -294,12 +414,15 @@ public static class CodeAnalysisService
                 {
                     foreach (var member in members)
                     {
-                        string memberKind = member.TryGetValue("kind", out var kindObj) ? kindObj.ToString() : "";
-                        switch (memberKind.ToLower())
+                        string memberKind = member.TryGetValue("kind", out var kindObj) ? kindObj?.ToString() ?? "" : "";
+                        if (!string.IsNullOrEmpty(memberKind))
                         {
-                            case "method": summary["methods"]++; break;
-                            case "property": summary["properties"]++; break;
-                            case "field": summary["fields"]++; break;
+                            switch (memberKind.ToLowerInvariant())
+                            {
+                                case "method": summary["methods"]++; break;
+                                case "property": summary["properties"]++; break;
+                                case "field": summary["fields"]++; break;
+                            }
                         }
                     }
                 }
@@ -458,14 +581,13 @@ public static class CodeAnalysisService
     /// <summary>
     /// Gets the kind of a C# type declaration (class, interface, struct, record, enum).
     /// </summary>
-    private static string GetTypeKind(Microsoft.CodeAnalysis.CSharp.Syntax.TypeDeclarationSyntax type)
+    private static string GetTypeKind(TypeDeclarationSyntax type)
     {
-        if (type is Microsoft.CodeAnalysis.CSharp.Syntax.ClassDeclarationSyntax) return "class";
-        if (type is Microsoft.CodeAnalysis.CSharp.Syntax.InterfaceDeclarationSyntax) return "interface";
-        if (type is Microsoft.CodeAnalysis.CSharp.Syntax.StructDeclarationSyntax) return "struct";
-        if (type is Microsoft.CodeAnalysis.CSharp.Syntax.RecordDeclarationSyntax) return "record";
-        if (type is Microsoft.CodeAnalysis.CSharp.Syntax.EnumDeclarationSyntax) return "enum";
-        return "unknown";
+        if (type is ClassDeclarationSyntax) return "class";
+        if (type is InterfaceDeclarationSyntax) return "interface";
+        if (type is StructDeclarationSyntax) return "struct";
+        if (type is RecordDeclarationSyntax) return "record";
+        return "unknown"; // EnumDeclarationSyntax is not a TypeDeclarationSyntax
     }
 
     /// <summary>

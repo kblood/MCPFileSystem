@@ -1,3 +1,4 @@
+using MCPFileSystemServer.Tools;
 using System.Text;
 
 namespace MCPFileSystemServer.Services;
@@ -11,8 +12,9 @@ public static class FileService
     /// Lists all files in the specified directory.
     /// </summary>
     /// <param name="directoryPath">The directory to list files from.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
     /// <returns>An array of file paths or an error message.</returns>
-    public static string[] ListFiles(string directoryPath)
+    public static string[] ListFiles(string directoryPath, bool respectGitignore = true)
     {
         try
         {
@@ -23,8 +25,32 @@ public static class FileService
                 return new[] { $"Error: Directory not found: {directoryPath}" };
             }
 
+            // Get directory info first
+            var dirInfo = new DirectoryInfo(normalizedPath);
+            List<string> result = new List<string>
+            {
+                $"Directory: {dirInfo.FullName}",
+                $"Created: {dirInfo.CreationTime}",
+                $"Last Modified: {dirInfo.LastWriteTime}"
+            };
+
+            // Get files
             var files = Directory.GetFiles(normalizedPath);
-            return files;
+            
+            // Apply gitignore filtering if requested
+            if (respectGitignore)
+            {
+                var gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
+                files = files.Where(file => !GitignoreService.IsPathIgnored(file, false, gitignoreRules)).ToArray();
+            }
+
+            // Add file count
+            result.Add($"File count: {files.Length}");
+            
+            // Add files to the result
+            result.AddRange(files);
+            
+            return result.ToArray();
         }
         catch (Exception ex)
         {
@@ -36,8 +62,9 @@ public static class FileService
     /// Lists all directories in the specified directory.
     /// </summary>
     /// <param name="directoryPath">The directory to list directories from.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
     /// <returns>An array of directory paths or an error message.</returns>
-    public static string[] ListDirectories(string directoryPath)
+    public static string[] ListDirectories(string directoryPath, bool respectGitignore = true)
     {
         try
         {
@@ -48,8 +75,32 @@ public static class FileService
                 return new[] { $"Error: Directory not found: {directoryPath}" };
             }
 
+            // Get directory info first
+            var dirInfo = new DirectoryInfo(normalizedPath);
+            List<string> result = new List<string>
+            {
+                $"Parent Directory: {dirInfo.FullName}",
+                $"Created: {dirInfo.CreationTime}",
+                $"Last Modified: {dirInfo.LastWriteTime}"
+            };
+
+            // Get subdirectories
             var directories = Directory.GetDirectories(normalizedPath);
-            return directories;
+            
+            // Apply gitignore filtering if requested
+            if (respectGitignore)
+            {
+                var gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
+                directories = directories.Where(dir => !GitignoreService.IsPathIgnored(dir, true, gitignoreRules)).ToArray();
+            }
+            
+            // Add directory count
+            result.Add($"Subdirectory count: {directories.Length}");
+            
+            // Add directories to the result
+            result.AddRange(directories);
+            
+            return result.ToArray();
         }
         catch (Exception ex)
         {
@@ -58,94 +109,95 @@ public static class FileService
     }
 
     /// <summary>
-    /// Lists all .csproj files in the base directory.
+    /// Lists all files and directories in the specified directory.
     /// </summary>
-    /// <returns>An array of .csproj file paths.</returns>
-    public static string[] ListProjects()
+    /// <param name="directoryPath">The directory to list contents from.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <returns>An array of content information or an error message.</returns>
+    public static string[] ListDirectoryContents(string directoryPath, bool respectGitignore = true)
     {
         try
         {
-            var baseDir = FileValidationService.BaseDirectory;
-            return Directory.GetFiles(baseDir, "*.csproj", SearchOption.AllDirectories);
-        }
-        catch (Exception ex)
-        {
-            return new[] { $"Error: {ex.Message}" };
-        }
-    }
-
-    /// <summary>
-    /// Lists all .csproj files in the specified directory.
-    /// </summary>
-    /// <param name="directory">The directory to search in.</param>
-    /// <returns>An array of .csproj file paths.</returns>
-    public static string[] ListProjectsInDirectory(string directory)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(directory);
+            var normalizedPath = FileValidationService.NormalizePath(directoryPath);
 
             if (!Directory.Exists(normalizedPath))
             {
-                return new[] { $"Error: Directory not found: {directory}" };
+                return new[] { $"Error: Directory not found: {directoryPath}" };
             }
 
-            return Directory.GetFiles(normalizedPath, "*.csproj", SearchOption.AllDirectories);
-        }
-        catch (Exception ex)
-        {
-            return new[] { $"Error: {ex.Message}" };
-        }
-    }
-
-    /// <summary>
-    /// Lists all .sln files in the base directory.
-    /// </summary>
-    /// <returns>An array of .sln file paths.</returns>
-    public static string[] ListSolutions()
-    {
-        try
-        {
-            var baseDir = FileValidationService.BaseDirectory;
-            return Directory.GetFiles(baseDir, "*.sln", SearchOption.AllDirectories);
-        }
-        catch (Exception ex)
-        {
-            return new[] { $"Error: {ex.Message}" };
-        }
-    }
-
-    /// <summary>
-    /// Lists all source files in a project directory.
-    /// </summary>
-    /// <param name="projectDir">The project directory to search in.</param>
-    /// <returns>An array of source file paths.</returns>
-    public static string[] ListSourceFiles(string projectDir)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(projectDir);
-
-            if (!Directory.Exists(normalizedPath))
+            // Get directory info first
+            var dirInfo = new DirectoryInfo(normalizedPath);
+            List<string> result = new List<string>
             {
-                return new[] { $"Error: Directory not found: {projectDir}" };
-            }
+                $"Directory: {dirInfo.FullName}",
+                $"Created: {dirInfo.CreationTime}",
+                $"Last Modified: {dirInfo.LastWriteTime}"
+            };
 
-            // Common source file extensions
-            var extensions = new[] { "*.cs", "*.vb", "*.fs", "*.ts", "*.js", "*.html", "*.css", "*.sql", "*.json", "*.xml" };
-            var files = new List<string>();
-
-            foreach (var extension in extensions)
+            // Load gitignore rules if needed
+            List<GitignoreRule> gitignoreRules = null;
+            if (respectGitignore)
             {
-                files.AddRange(Directory.GetFiles(normalizedPath, extension, SearchOption.AllDirectories));
+                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
             }
 
-            // Filter out common binary folders
-            var result = files.Where(f => !f.Contains("\\bin\\") && 
-                                         !f.Contains("\\obj\\") && 
-                                         !f.Contains("\\node_modules\\")).ToArray();
+            // Get subdirectories
+            var directories = Directory.GetDirectories(normalizedPath);
+            
+            // Apply gitignore filtering if requested
+            if (respectGitignore)
+            {
+                directories = directories.Where(dir => 
+                    !GitignoreService.IsPathIgnored(dir, true, gitignoreRules)).ToArray();
+            }
+            
+            // Get files
+            var files = Directory.GetFiles(normalizedPath);
+            
+            // Apply gitignore filtering if requested
+            if (respectGitignore)
+            {
+                files = files.Where(file => 
+                    !GitignoreService.IsPathIgnored(file, false, gitignoreRules)).ToArray();
+            }
 
-            return result;
+            // Add counts
+            result.Add($"Subdirectory count: {directories.Length}");
+            result.Add($"File count: {files.Length}");
+            result.Add("---");
+            
+            // Add directories with folder indicator
+            result.Add("FOLDERS:");
+            if (directories.Length > 0)
+            {
+                foreach (var dir in directories)
+                {
+                    result.Add($"📁 {Path.GetFileName(dir)}");
+                }
+            }
+            else
+            {
+                result.Add("(No folders)");
+            }
+            
+            result.Add("---");
+            
+            // Add files
+            result.Add("FILES:");
+            if (files.Length > 0)
+            {
+                foreach (var file in files)
+                {
+                    var fileInfo = new FileInfo(file);
+                    result.Add($"📄 {Path.GetFileName(file)} ({FileTools.GetFileSize(fileInfo.Length)})");
+                }
+            }
+            else
+            {
+                result.Add("(No files)");
+            }
+            
+            return result.ToArray();
         }
         catch (Exception ex)
         {
@@ -281,6 +333,250 @@ public static class FileService
     }
 
     /// <summary>
+    /// Copies a file to a new location.
+    /// </summary>
+    /// <param name="source">The source file path.</param>
+    /// <param name="destination">The destination file path.</param>
+    /// <param name="overwrite">Whether to overwrite existing files.</param>
+    /// <returns>Success message or error message.</returns>
+    public static string CopyFile(string source, string destination, bool overwrite = false)
+    {
+        try
+        {
+            var normalizedSource = FileValidationService.NormalizePath(source);
+            var normalizedDestination = FileValidationService.NormalizePath(destination);
+
+            // Check if source exists and is a file
+            if (!File.Exists(normalizedSource))
+            {
+                return $"Error: Source file not found: {source}";
+            }
+
+            // Check if destination already exists and overwrite is false
+            if (File.Exists(normalizedDestination) && !overwrite)
+            {
+                return $"Error: Destination file already exists: {destination}. Use overwrite=true to replace it.";
+            }
+
+            // Ensure destination directory exists
+            var destDir = Path.GetDirectoryName(normalizedDestination);
+            if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
+            {
+                Directory.CreateDirectory(destDir);
+            }
+
+            File.Copy(normalizedSource, normalizedDestination, overwrite);
+            return $"Successfully copied file from {source} to {destination}";
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Copies a directory and its contents to a new location.
+    /// </summary>
+    /// <param name="source">The source directory path.</param>
+    /// <param name="destination">The destination directory path.</param>
+    /// <param name="overwrite">Whether to overwrite existing files.</param>
+    /// <param name="recursive">Whether to copy subdirectories.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <returns>Success message or error message.</returns>
+    public static string CopyDirectory(string source, string destination, bool overwrite = false, bool recursive = true, bool respectGitignore = true)
+    {
+        try
+        {
+            var normalizedSource = FileValidationService.NormalizePath(source);
+            var normalizedDestination = FileValidationService.NormalizePath(destination);
+
+            // Check if source exists and is a directory
+            if (!Directory.Exists(normalizedSource))
+            {
+                return $"Error: Source directory not found: {source}";
+            }
+
+            // Create destination directory if it doesn't exist
+            if (!Directory.Exists(normalizedDestination))
+            {
+                Directory.CreateDirectory(normalizedDestination);
+            }
+
+            // Load gitignore rules if needed
+            List<GitignoreRule> gitignoreRules = null;
+            if (respectGitignore)
+            {
+                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedSource);
+            }
+
+            // Get files in source directory
+            var files = Directory.GetFiles(normalizedSource);
+            int copiedFiles = 0;
+            int copiedDirs = 0;
+
+            // Copy each file
+            foreach (var file in files)
+            {
+                var fileName = Path.GetFileName(file);
+                var destFile = Path.Combine(normalizedDestination, fileName);
+
+                // Skip if file is ignored by gitignore
+                if (respectGitignore && GitignoreService.IsPathIgnored(file, false, gitignoreRules))
+                {
+                    continue;
+                }
+
+                File.Copy(file, destFile, overwrite);
+                copiedFiles++;
+            }
+
+            // Copy subdirectories if recursive is true
+            if (recursive)
+            {
+                var dirs = Directory.GetDirectories(normalizedSource);
+                foreach (var dir in dirs)
+                {
+                    var dirName = Path.GetFileName(dir);
+                    var destDir = Path.Combine(normalizedDestination, dirName);
+
+                    // Skip if directory is ignored by gitignore
+                    if (respectGitignore && GitignoreService.IsPathIgnored(dir, true, gitignoreRules))
+                    {
+                        continue;
+                    }
+
+                    var result = CopyDirectory(dir, destDir, overwrite, recursive, respectGitignore);
+                    
+                    // If successful, increment count (extract the count from result)
+                    if (!result.StartsWith("Error:"))
+                    {
+                        copiedDirs++;
+                    }
+                }
+            }
+
+            return $"Successfully copied directory from {source} to {destination}. Copied {copiedFiles} files and {copiedDirs} directories.";
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Copies files matching a pattern from source to destination directory.
+    /// </summary>
+    /// <param name="sourceDir">The source directory to copy files from.</param>
+    /// <param name="destinationDir">The destination directory to copy files to.</param>
+    /// <param name="pattern">File pattern to match (e.g., "*.exe", "data.*").</param>
+    /// <param name="recursive">Whether to search subdirectories recursively.</param>
+    /// <param name="overwrite">Whether to overwrite existing files.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <returns>Result message with statistics about the copied files.</returns>
+    public static string CopyFilesWithPattern(
+        string sourceDir, 
+        string destinationDir, 
+        string pattern = "*.*", 
+        bool recursive = false,
+        bool overwrite = false,
+        bool respectGitignore = true)
+    {
+        try
+        {
+            var normalizedSourceDir = FileValidationService.NormalizePath(sourceDir);
+            var normalizedDestDir = FileValidationService.NormalizePath(destinationDir);
+
+            // Check if source directory exists
+            if (!Directory.Exists(normalizedSourceDir))
+            {
+                return $"Error: Source directory not found: {sourceDir}";
+            }
+
+            // Create destination directory if it doesn't exist
+            if (!Directory.Exists(normalizedDestDir))
+            {
+                Directory.CreateDirectory(normalizedDestDir);
+            }
+
+            // Load gitignore rules if needed
+            List<GitignoreRule> gitignoreRules = null;
+            if (respectGitignore)
+            {
+                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedSourceDir);
+            }
+
+            // Find all matching files
+            var files = Directory.GetFiles(normalizedSourceDir, pattern,
+                recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
+            
+            // Apply gitignore filtering if requested
+            if (respectGitignore && gitignoreRules != null)
+            {
+                files = files.Where(file => !GitignoreService.IsPathIgnored(file, false, gitignoreRules)).ToArray();
+            }
+
+            if (files.Length == 0)
+            {
+                return $"No files matching pattern '{pattern}' found in {sourceDir}";
+            }
+
+            // Copy each matching file
+            int successCount = 0;
+            int failCount = 0;
+            var results = new StringBuilder();
+            
+            foreach (var file in files)
+            {
+                try
+                {
+                    // Calculate relative path to maintain directory structure if copying recursively
+                    string relativePath = Path.GetRelativePath(normalizedSourceDir, file);
+                    string destinationFile = Path.Combine(normalizedDestDir, relativePath);
+                    
+                    // Ensure destination directory exists for the file
+                    string destinationFileDir = Path.GetDirectoryName(destinationFile);
+                    if (!Directory.Exists(destinationFileDir))
+                    {
+                        Directory.CreateDirectory(destinationFileDir);
+                    }
+
+                    // Skip if file already exists and overwrite is false
+                    if (File.Exists(destinationFile) && !overwrite)
+                    {
+                        results.AppendLine($"Skipped (already exists): {relativePath}");
+                        continue;
+                    }
+
+                    // Copy the file
+                    File.Copy(file, destinationFile, overwrite);
+                    successCount++;
+                    results.AppendLine($"Copied: {relativePath}");
+                }
+                catch (Exception ex)
+                {
+                    failCount++;
+                    results.AppendLine($"Failed to copy {Path.GetFileName(file)}: {ex.Message}");
+                }
+            }
+
+            // Build summary
+            var summary = new StringBuilder();
+            summary.AppendLine($"Copied {successCount} files from {sourceDir} to {destinationDir}");
+            if (failCount > 0)
+            {
+                summary.AppendLine($"Failed to copy {failCount} files");
+            }
+            summary.AppendLine(results.ToString());
+            
+            return summary.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    /// <summary>
     /// Edits a file by replacing specified text.
     /// </summary>
     /// <param name="filePath">The path of the file to edit.</param>
@@ -328,8 +624,11 @@ public static class FileService
     /// Gets a recursive directory tree as a JSON-serializable object.
     /// </summary>
     /// <param name="path">The root directory path.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <param name="showHidden">Whether to include hidden files and directories.</param>
+    /// <param name="includeGitFolders">Whether to include .git folders.</param>
     /// <returns>A nested structure representing the directory tree.</returns>
-    public static object GetDirectoryTree(string path)
+    public static object GetDirectoryTree(string path, bool respectGitignore = true, bool showHidden = false, bool includeGitFolders = false)
     {
         try
         {
@@ -340,7 +639,7 @@ public static class FileService
                 return new { error = $"Directory not found: {path}" };
             }
 
-            return BuildDirectoryTree(new System.IO.DirectoryInfo(normalizedPath));
+            return BuildDirectoryTree(new System.IO.DirectoryInfo(normalizedPath), respectGitignore, showHidden, includeGitFolders);
         }
         catch (Exception ex)
         {
@@ -408,31 +707,64 @@ public static class FileService
 
     #region Helper Methods
 
-    private static object BuildDirectoryTree(System.IO.DirectoryInfo directoryInfo)
+    private static object BuildDirectoryTree(System.IO.DirectoryInfo directoryInfo, bool respectGitignore = true, bool showHidden = false, bool includeGitFolders = false)
     {
         var result = new Dictionary<string, object>
         {
             ["name"] = directoryInfo.Name,
+            ["path"] = directoryInfo.FullName,
             ["type"] = "directory",
-            ["children"] = new List<object>()
+            ["created"] = directoryInfo.CreationTime,
+            ["modified"] = directoryInfo.LastWriteTime
         };
 
-        // Add subdirectories
-        foreach (var subDir in directoryInfo.GetDirectories())
+        // Load gitignore rules if needed
+        List<GitignoreRule> gitignoreRules = null;
+        if (respectGitignore)
         {
-            ((List<object>)result["children"]).Add(BuildDirectoryTree(subDir));
+            gitignoreRules = GitignoreService.LoadGitignoreRules(directoryInfo.FullName);
         }
 
-        // Add files
-        foreach (var file in directoryInfo.GetFiles())
+        // Process subdirectories
+        var subdirectories = directoryInfo.GetDirectories()
+            .Where(subDir => 
+                (includeGitFolders || !subDir.Name.Equals(".git", StringComparison.OrdinalIgnoreCase)) &&
+                (showHidden || (!subDir.Attributes.HasFlag(FileAttributes.Hidden) && !subDir.Name.StartsWith("."))) &&
+                (!respectGitignore || !GitignoreService.IsPathIgnored(subDir.FullName, true, gitignoreRules)))
+            .ToList();
+            
+        // Process files
+        var files = directoryInfo.GetFiles()
+            .Where(file => 
+                (showHidden || (!file.Attributes.HasFlag(FileAttributes.Hidden) && !file.Name.StartsWith("."))) &&
+                (!respectGitignore || !GitignoreService.IsPathIgnored(file.FullName, false, gitignoreRules)))
+            .ToList();
+
+        // Add directories and files count
+        result["directories"] = subdirectories.Count;
+        result["files"] = files.Count;
+        
+        // Prepare list with directories first, then files
+        var children = new List<object>();
+        
+        // Add subdirectories
+        foreach (var subDir in subdirectories)
         {
-            ((List<object>)result["children"]).Add(new Dictionary<string, object>
+            children.Add(BuildDirectoryTree(subDir, respectGitignore, showHidden, includeGitFolders));
+        }
+        
+        // Add files more efficiently - just name and size
+        foreach (var file in files)
+        {
+            children.Add(new Dictionary<string, object>
             {
                 ["name"] = file.Name,
-                ["type"] = "file"
+                ["type"] = "file",
+                ["size"] = FileTools.GetFileSize(file.Length)
             });
         }
-
+        
+        result["children"] = children;
         return result;
     }
 

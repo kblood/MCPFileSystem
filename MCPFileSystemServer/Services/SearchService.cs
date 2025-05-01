@@ -15,8 +15,9 @@ public static class SearchService
     /// <param name="searchText">The text to search for.</param>
     /// <param name="filePattern">Optional file pattern to filter by (e.g., "*.cs").</param>
     /// <param name="recursive">Whether to search subdirectories.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
     /// <returns>A dictionary with search results.</returns>
-    public static Dictionary<string, List<SearchMatch>> SearchTextInFiles(string directory, string searchText, string filePattern = "*.*", bool recursive = true)
+    public static Dictionary<string, List<SearchMatch>> SearchTextInFiles(string directory, string searchText, string filePattern = "*.*", bool recursive = true, bool respectGitignore = true)
     {
         try
         {
@@ -41,11 +42,24 @@ public static class SearchService
             var results = new Dictionary<string, List<SearchMatch>>();
             var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
             var files = Directory.GetFiles(normalizedPath, filePattern, searchOption);
+            
+            // Load gitignore rules if needed
+            List<GitignoreRule> gitignoreRules = null;
+            if (respectGitignore)
+            {
+                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
+            }
 
             foreach (var file in files)
             {
                 try
                 {
+                    // Skip files that match gitignore patterns
+                    if (respectGitignore && GitignoreService.IsPathIgnored(file, false, gitignoreRules))
+                    {
+                        continue;
+                    }
+                    
                     // Skip binary files or files that are too large
                     var fileInfo = new System.IO.FileInfo(file);
                     if (fileInfo.Length > 10 * 1024 * 1024) // Skip files larger than 10MB
@@ -101,8 +115,9 @@ public static class SearchService
     /// <param name="filePattern">Optional file pattern to filter by (e.g., "*.cs").</param>
     /// <param name="recursive">Whether to search subdirectories.</param>
     /// <param name="dryRun">Whether to perform a dry run without making changes.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
     /// <returns>A dictionary with results for each file.</returns>
-    public static Dictionary<string, string> SearchAndReplaceInFiles(string directory, string searchText, string replaceText, string filePattern = "*.*", bool recursive = true, bool dryRun = false)
+    public static Dictionary<string, string> SearchAndReplaceInFiles(string directory, string searchText, string replaceText, string filePattern = "*.*", bool recursive = true, bool dryRun = false, bool respectGitignore = true)
     {
         try
         {
@@ -121,11 +136,24 @@ public static class SearchService
             var results = new Dictionary<string, string>();
             var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
             var files = Directory.GetFiles(normalizedPath, filePattern, searchOption);
+            
+            // Load gitignore rules if needed
+            List<GitignoreRule> gitignoreRules = null;
+            if (respectGitignore)
+            {
+                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
+            }
 
             foreach (var file in files)
             {
                 try
                 {
+                    // Skip files that match gitignore patterns
+                    if (respectGitignore && GitignoreService.IsPathIgnored(file, false, gitignoreRules))
+                    {
+                        continue;
+                    }
+                    
                     // Skip binary files or files that are too large
                     var fileInfo = new System.IO.FileInfo(file);
                     if (fileInfo.Length > 10 * 1024 * 1024) // Skip files larger than 10MB
@@ -174,8 +202,9 @@ public static class SearchService
     /// <param name="directory">The directory to search in.</param>
     /// <param name="pattern">The search pattern.</param>
     /// <param name="excludePatterns">Optional patterns to exclude.</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
     /// <returns>An array of file paths matching the search criteria.</returns>
-    public static string[] SearchFiles(string directory, string pattern, string[] excludePatterns = null)
+    public static string[] SearchFiles(string directory, string pattern, string[] excludePatterns = null, bool respectGitignore = true)
     {
         try
         {
@@ -185,20 +214,40 @@ public static class SearchService
             {
                 return new[] { $"Error: Directory not found: {directory}" };
             }
+            
+            // Load gitignore rules if needed
+            List<GitignoreRule> gitignoreRules = null;
+            if (respectGitignore)
+            {
+                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
+            }
 
             var files = Directory.GetFiles(normalizedPath, $"*{pattern}*", SearchOption.AllDirectories);
             
-            if (excludePatterns != null && excludePatterns.Length > 0)
+            // Apply filters
+            var filteredFiles = files.Where(file =>
             {
-                // Filter out files matching any exclude pattern
-                files = files.Where(file => 
+                // Check gitignore rules
+                if (respectGitignore && gitignoreRules != null && 
+                    GitignoreService.IsPathIgnored(file, false, gitignoreRules))
+                {
+                    return false;
+                }
+                
+                // Check exclude patterns
+                if (excludePatterns != null && excludePatterns.Length > 0)
                 {
                     var fileName = Path.GetFileName(file);
-                    return !excludePatterns.Any(p => fileName.Contains(p));
-                }).ToArray();
-            }
+                    if (excludePatterns.Any(p => fileName.Contains(p)))
+                    {
+                        return false;
+                    }
+                }
+                
+                return true;
+            }).ToArray();
 
-            return files;
+            return filteredFiles;
         }
         catch (Exception ex)
         {

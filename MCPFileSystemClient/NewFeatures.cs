@@ -8,91 +8,15 @@ namespace MCPFileSystem.Client
     // Extension methods for the MCPFileSystemClient class to add new features
     public partial class MCPFileSystemClient
     {
-        public async Task<List<DirectoryInfo>> ListAccessibleDirectoriesAsync()
-        {
-            try
-            {
-                Console.WriteLine("ListAccessibleDirectoriesAsync");
-                var response = await SendMCPRequestAsync("list_accessible");
-                var parsedResponse = ParseResponse(response);
-                
-                if (!parsedResponse.IsSuccess)
-                {
-                    throw new Exception($"Failed to list accessible directories: {parsedResponse.Data}");
-                }
-                
-                if (string.IsNullOrEmpty(parsedResponse.Data))
-                {
-                    Console.WriteLine("WARNING: Empty data in response for ListAccessibleDirectoriesAsync");
-                    return new List<DirectoryInfo>();
-                }
-                
-                try
-                {
-                    var options = new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    };
-                    
-                    return JsonSerializer.Deserialize<List<DirectoryInfo>>(parsedResponse.Data, options) ?? new List<DirectoryInfo>();
-                }
-                catch (JsonException je)
-                {
-                    Console.WriteLine($"JSON Error: {je.Message}");
-                    Console.WriteLine($"JSON Data: {parsedResponse.Data}");
-                    throw;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"ERROR in ListAccessibleDirectoriesAsync: {ex.GetType().Name}: {ex.Message}");
-                throw;
-            }
-        }
-        
+        // This method is replaced by the one in Program.cs that includes respectGitignore parameter
+        /*
         public async Task<DirectoryTreeNode> GetDirectoryTreeAsync(string path)
         {
-            try
-            {
-                Console.WriteLine($"GetDirectoryTreeAsync: {path}");
-                var response = await SendMCPRequestAsync("tree", path);
-                var parsedResponse = ParseResponse(response);
-                
-                if (!parsedResponse.IsSuccess)
-                {
-                    throw new Exception($"Failed to get directory tree: {parsedResponse.Data}");
-                }
-                
-                if (string.IsNullOrEmpty(parsedResponse.Data))
-                {
-                    Console.WriteLine("WARNING: Empty data in response for GetDirectoryTreeAsync");
-                    return new DirectoryTreeNode { Name = "Empty", Type = "directory", Children = new List<DirectoryTreeNode>() };
-                }
-                
-                try
-                {
-                    var options = new JsonSerializerOptions
-                    {
-                        PropertyNameCaseInsensitive = true
-                    };
-                    
-                    return JsonSerializer.Deserialize<DirectoryTreeNode>(parsedResponse.Data, options);
-                }
-                catch (JsonException je)
-                {
-                    Console.WriteLine($"JSON Error: {je.Message}");
-                    Console.WriteLine($"JSON Data: {parsedResponse.Data}");
-                    throw;
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"ERROR in GetDirectoryTreeAsync: {ex.GetType().Name}: {ex.Message}");
-                throw;
-            }
+            // Implementation removed as it's now in Program.cs with additional parameter
         }
+        */
         
-        public async Task<List<SearchResult>> SearchFilesAsync(string path, string pattern, List<string> excludePatterns = null)
+        public async Task<List<SearchResult>> SearchFilesAsync(string path, string pattern, List<string>? excludePatterns = null)
         {
             try
             {
@@ -146,31 +70,7 @@ namespace MCPFileSystem.Client
             }
         }
         
-        public async Task MoveFileAsync(string source, string destination)
-        {
-            try
-            {
-                Console.WriteLine($"MoveFileAsync: From {source} to {destination}");
-                var parameters = JsonSerializer.Serialize(new
-                {
-                    source,
-                    destination
-                });
-                
-                var response = await SendMCPRequestAsync("move", parameters);
-                var parsedResponse = ParseResponse(response);
-                
-                if (!parsedResponse.IsSuccess)
-                {
-                    throw new Exception($"Failed to move file: {parsedResponse.Data}");
-                }
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"ERROR in MoveFileAsync: {ex.GetType().Name}: {ex.Message}");
-                throw;
-            }
-        }
+        // Removed duplicate MoveFileAsync implementation
         
         public async Task<EditResult> EditFileAsync(string path, List<EditOperation> edits, bool dryRun = false)
         {
@@ -196,7 +96,7 @@ namespace MCPFileSystem.Client
                 if (string.IsNullOrEmpty(parsedResponse.Data))
                 {
                     Console.WriteLine("WARNING: Empty data in response for EditFileAsync");
-                    return new EditResult { EditCount = 0, Diff = "" };
+                    return new EditResult { EditCount = 0, Diff = string.Empty };
                 }
                 
                 try
@@ -206,7 +106,7 @@ namespace MCPFileSystem.Client
                         PropertyNameCaseInsensitive = true
                     };
                     
-                    return JsonSerializer.Deserialize<EditResult>(parsedResponse.Data, options) ?? new EditResult { EditCount = 0, Diff = "" };
+                    return JsonSerializer.Deserialize<EditResult>(parsedResponse.Data, options) ?? new EditResult { EditCount = 0, Diff = string.Empty };
                 }
                 catch (JsonException je)
                 {
@@ -223,37 +123,11 @@ namespace MCPFileSystem.Client
         }
     }
     
-    // Model classes for the new features
+    // Model class for the new features
     public class DirectoryInfo
     {
-        public string Alias { get; set; }
-        public string Name { get; set; }
-        public string Path { get; set; }
-    }
-    
-    public class DirectoryTreeNode
-    {
-        public string Name { get; set; }
-        public string Type { get; set; }
-        public long? Size { get; set; }
-        public List<DirectoryTreeNode> Children { get; set; }
-    }
-    
-    public class SearchResult
-    {
-        public string Path { get; set; }
-        public string Type { get; set; }
-    }
-    
-    public class EditOperation
-    {
-        public string OldText { get; set; }
-        public string NewText { get; set; }
-    }
-    
-    public class EditResult
-    {
-        public int EditCount { get; set; }
-        public string Diff { get; set; }
+        public string Alias { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+        public string Path { get; set; } = string.Empty;
     }
 }

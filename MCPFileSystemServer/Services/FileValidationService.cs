@@ -9,6 +9,7 @@ public static class FileValidationService
 {
     private static string _baseDirectory = Directory.GetCurrentDirectory();
     private static readonly List<string> _accessibleDirectories = new();
+    private static readonly object _syncLock = new object(); // Add thread safety
 
     static FileValidationService()
     {
@@ -38,16 +39,18 @@ public static class FileValidationService
             throw new DirectoryNotFoundException($"Directory not found: {directory}");
         }
 
-        _baseDirectory = directory;
-        
-        // If the old base directory was in the accessible directories list, replace it
-        if (_accessibleDirectories.Count > 0)
+        lock (_syncLock)
         {
-            _accessibleDirectories[0] = directory;
-        }
-        else
-        {
-            _accessibleDirectories.Add(directory);
+            var normalizedPath = Path.GetFullPath(directory);
+            _baseDirectory = normalizedPath;
+            
+            // Make sure the base directory is always the first item in the accessible list
+            // First remove it if it's already in the list (at any position)
+            _accessibleDirectories.RemoveAll(d => 
+                string.Equals(Path.GetFullPath(d), normalizedPath, StringComparison.OrdinalIgnoreCase));
+            
+            // Then add it as the first item
+            _accessibleDirectories.Insert(0, normalizedPath);
         }
     }
 
@@ -64,15 +67,26 @@ public static class FileValidationService
             throw new DirectoryNotFoundException($"Directory not found: {directory}");
         }
 
-        var normalizedPath = Path.GetFullPath(directory);
-        
-        if (_accessibleDirectories.Any(d => string.Equals(Path.GetFullPath(d), normalizedPath, StringComparison.OrdinalIgnoreCase)))
+        lock (_syncLock)
         {
-            return false; // Already in the list
-        }
+            var normalizedPath = Path.GetFullPath(directory);
+            
+            // Check if this is the same as the base directory
+            if (string.Equals(normalizedPath, Path.GetFullPath(_baseDirectory), StringComparison.OrdinalIgnoreCase))
+            {
+                return false; // It's already the base directory, which is always accessible
+            }
+            
+            // Check if it's already in the list
+            if (_accessibleDirectories.Any(d => 
+                string.Equals(Path.GetFullPath(d), normalizedPath, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false; // Already in the list
+            }
 
-        _accessibleDirectories.Add(normalizedPath);
-        return true;
+            _accessibleDirectories.Add(normalizedPath);
+            return true;
+        }
     }
 
     /// <summary>
