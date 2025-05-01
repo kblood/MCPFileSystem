@@ -1,2 +1,0 @@
-C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemServer\Publish\MCPFileSystemServer.pdb
-C:\LLM\Projects\ClaudeTest\MCPFileSystem\MCPFileSystemServer\Publish\MCPFileSystemServer.exe
