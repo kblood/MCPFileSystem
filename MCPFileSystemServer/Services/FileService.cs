@@ -577,14 +577,15 @@ public static class FileService
     }
 
     /// <summary>
-    /// Edits a file by replacing specified text.
+    /// Edits a file by replacing specified text, inserting at a specific line, or appending to the end.
     /// </summary>
     /// <param name="filePath">The path of the file to edit.</param>
-    /// <param name="oldText">The text to replace.</param>
-    /// <param name="newText">The new text.</param>
+    /// <param name="oldText">The text to replace (set to null if using insertMode).</param>
+    /// <param name="newText">The new text to add or replace with.</param>
     /// <param name="dryRun">Whether to perform a dry run without making changes.</param>
+    /// <param name="insertMode">The insertion mode: null for replace, "end" to append to file, or a line number to insert at.</param>
     /// <returns>Success message, diff result, or error message.</returns>
-    public static string EditFile(string filePath, string oldText, string newText, bool dryRun = false)
+    public static string EditFile(string filePath, string? oldText, string newText, bool dryRun = false, object? insertMode = null)
     {
         try
         {
@@ -595,24 +596,75 @@ public static class FileService
                 return $"Error: File not found: {filePath}";
             }
 
-            var content = File.ReadAllText(normalizedPath);
+            // Read the original content
+            var originalContent = File.ReadAllText(normalizedPath);
+            string newContent;
             
-            if (!content.Contains(oldText))
+            // Determine edit mode based on insertMode parameter
+            if (insertMode == null)
             {
-                return $"Error: Old text not found in file: {filePath}";
-            }
+                // Standard replacement mode (original behavior)
+                if (string.IsNullOrEmpty(oldText))
+                {
+                    return $"Error: Old text cannot be null or empty in replacement mode.";
+                }
+                
+                if (!originalContent.Contains(oldText))
+                {
+                    return $"Error: Old text not found in file: {filePath}";
+                }
 
-            var newContent = content.Replace(oldText, newText);
+                newContent = originalContent.Replace(oldText, newText);
+            }
+            else if (insertMode is string strInsertMode && strInsertMode.Equals("end", StringComparison.OrdinalIgnoreCase))
+            {
+                // Append to end mode
+                newContent = originalContent;
+                
+                // Add a newline if the file doesn't end with one
+                if (!string.IsNullOrEmpty(originalContent) && 
+                    !originalContent.EndsWith("\n") && 
+                    !originalContent.EndsWith("\r"))
+                {
+                    newContent += Environment.NewLine;
+                }
+                
+                newContent += newText;
+            }
+            else if (insertMode is int lineNum || (insertMode is string strLineNum && int.TryParse(strLineNum, out lineNum)))
+            {
+                // Line number mode
+                var lines = File.ReadAllLines(normalizedPath).ToList();
+                
+                // Validate line number
+                if (lineNum < 0 || lineNum > lines.Count)
+                {
+                    return $"Error: Line number {lineNum} is out of range. File has {lines.Count} lines.";
+                }
+                
+                // Insert at the specified line
+                lines.Insert(lineNum, newText);
+                newContent = string.Join(Environment.NewLine, lines);
+            }
+            else
+            {
+                return $"Error: Invalid insertMode: {insertMode}. Use null for replace, \"end\" to append, or a line number.";
+            }
 
             if (dryRun)
             {
                 // Generate a simple diff
-                var diff = SearchService.GenerateDiff(content, newContent);
+                var diff = SearchService.GenerateDiff(originalContent, newContent);
                 return $"Dry run diff:\n{diff}";
             }
 
             File.WriteAllText(normalizedPath, newContent);
-            return $"Successfully edited file {filePath}";
+            
+            string modeDescription = insertMode == null ? "replaced text in" :
+                                    insertMode is string && ((string)insertMode).Equals("end") ? "appended to" :
+                                    $"inserted at line {insertMode} in";
+            
+            return $"Successfully {modeDescription} file {filePath}";
         }
         catch (Exception ex)
         {

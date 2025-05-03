@@ -112,25 +112,28 @@ public static class FileTools
         FileService.WriteFile(path, content);
 
     /// <summary>
-    /// Make line-based edits to a text file.
+    /// Make line-based edits to a text file, including inserting at end or at specific lines.
     /// </summary>
     /// <param name="path">Path to the file to edit.</param>
-    /// <param name="oldText">Text to search for - must match exactly.</param>
-    /// <param name="newText">Text to replace with.</param>
+    /// <param name="oldText">Text to search for and replace. Can be null when using insertMode.</param>
+    /// <param name="newText">Text to replace with or insert.</param>
     /// <param name="dryRun">Preview changes using git-style diff format.</param>
+    /// <param name="insertMode">How to insert: null for replace, "end" to append to file, or a line number to insert at.</param>
     /// <returns>Success message, diff result, or error message.</returns>
     [McpServerTool("edit_file")]
-    [Description("Make line-based edits to a text file.")]
+    [Description("Make line-based edits to a text file, including inserting at end or at specific lines.")]
     public static string EditFile(
         [Description("Path to the file to edit")]
         string path,
-        [Description("Text to search for - must match exactly")]
-        string oldText,
-        [Description("Text to replace with")]
+        [Description("Text to search for and replace. Can be null when using insertMode")]
+        string? oldText,
+        [Description("Text to replace with or insert")]
         string newText,
         [Description("Preview changes using git-style diff format")]
-        bool dryRun = false) =>
-        FileService.EditFile(path, oldText, newText, dryRun);
+        bool dryRun = false,
+        [Description("How to insert: null for replace, \"end\" to append to file, or a line number to insert at")]
+        object? insertMode = null) =>
+        FileService.EditFile(path, oldText, newText, dryRun, insertMode);
 
     /// <summary>
     /// Create a new directory or ensure a directory exists.
