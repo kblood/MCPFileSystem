@@ -577,15 +577,14 @@ public static class FileService
     }
 
     /// <summary>
-    /// Edits a file by replacing specified text, inserting at a specific line, or appending to the end.
+    /// Edits a file by replacing specified text.
     /// </summary>
     /// <param name="filePath">The path of the file to edit.</param>
-    /// <param name="oldText">The text to replace (set to null if using insertMode).</param>
-    /// <param name="newText">The new text to add or replace with.</param>
+    /// <param name="oldText">The text to replace.</param>
+    /// <param name="newText">The new text to replace with.</param>
     /// <param name="dryRun">Whether to perform a dry run without making changes.</param>
-    /// <param name="insertMode">The insertion mode: null for replace, "end" to append to file, or a line number to insert at.</param>
     /// <returns>Success message, diff result, or error message.</returns>
-    public static string EditFile(string filePath, string? oldText, string newText, bool dryRun = false, object? insertMode = null)
+    public static string EditFile(string filePath, string oldText, string newText, bool dryRun = false)
     {
         try
         {
@@ -599,57 +598,19 @@ public static class FileService
             // Read the original content
             var originalContent = File.ReadAllText(normalizedPath);
             string newContent;
-            
-            // Determine edit mode based on insertMode parameter
-            if (insertMode == null)
-            {
-                // Standard replacement mode (original behavior)
-                if (string.IsNullOrEmpty(oldText))
-                {
-                    return $"Error: Old text cannot be null or empty in replacement mode.";
-                }
-                
-                if (!originalContent.Contains(oldText))
-                {
-                    return $"Error: Old text not found in file: {filePath}";
-                }
 
-                newContent = originalContent.Replace(oldText, newText);
-            }
-            else if (insertMode is string strInsertMode && strInsertMode.Equals("end", StringComparison.OrdinalIgnoreCase))
+            // Only support replacement mode
+            if (string.IsNullOrEmpty(oldText))
             {
-                // Append to end mode
-                newContent = originalContent;
-                
-                // Add a newline if the file doesn't end with one
-                if (!string.IsNullOrEmpty(originalContent) && 
-                    !originalContent.EndsWith("\n") && 
-                    !originalContent.EndsWith("\r"))
-                {
-                    newContent += Environment.NewLine;
-                }
-                
-                newContent += newText;
+                return $"Error: Old text cannot be null or empty in replacement mode.";
             }
-            else if (insertMode is int lineNum || (insertMode is string strLineNum && int.TryParse(strLineNum, out lineNum)))
+
+            if (!originalContent.Contains(oldText))
             {
-                // Line number mode
-                var lines = File.ReadAllLines(normalizedPath).ToList();
-                
-                // Validate line number
-                if (lineNum < 0 || lineNum > lines.Count)
-                {
-                    return $"Error: Line number {lineNum} is out of range. File has {lines.Count} lines.";
-                }
-                
-                // Insert at the specified line
-                lines.Insert(lineNum, newText);
-                newContent = string.Join(Environment.NewLine, lines);
+                return $"Error: Old text not found in file: {filePath}";
             }
-            else
-            {
-                return $"Error: Invalid insertMode: {insertMode}. Use null for replace, \"end\" to append, or a line number.";
-            }
+
+            newContent = originalContent.Replace(oldText, newText);
 
             if (dryRun)
             {
@@ -659,11 +620,74 @@ public static class FileService
             }
 
             File.WriteAllText(normalizedPath, newContent);
-            
-            string modeDescription = insertMode == null ? "replaced text in" :
-                                    insertMode is string && ((string)insertMode).Equals("end") ? "appended to" :
-                                    $"inserted at line {insertMode} in";
-            
+            return $"Successfully replaced text in file {filePath}";
+        }
+        catch (Exception ex)
+        {
+            return $"Error: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Inserts text into a file at a specific line or at the end.
+    /// </summary>
+    /// <param name="filePath">The path of the file to insert into.</param>
+    /// <param name="newText">The new text to insert.</param>
+    /// <param name="insertMode">"end" to append, or a line number to insert at.</param>
+    /// <param name="dryRun">Whether to perform a dry run without making changes.</param>
+    /// <returns>Success message, diff result, or error message.</returns>
+    public static string InsertIntoFile(string filePath, string newText, object? insertMode = null, bool dryRun = false)
+    {
+        try
+        {
+            var normalizedPath = FileValidationService.NormalizePath(filePath);
+
+            if (!File.Exists(normalizedPath))
+            {
+                return $"Error: File not found: {filePath}";
+            }
+
+            // Read the original content
+            var originalContent = File.ReadAllText(normalizedPath);
+            string newContent;
+
+            if (insertMode is string strInsertMode && strInsertMode.Equals("end", StringComparison.OrdinalIgnoreCase))
+            {
+                // Append to end mode
+                newContent = originalContent;
+                if (!string.IsNullOrEmpty(originalContent) &&
+                    !originalContent.EndsWith("\n") &&
+                    !originalContent.EndsWith("\r"))
+                {
+                    newContent += Environment.NewLine;
+                }
+                newContent += newText;
+            }
+            else if (insertMode is int lineNum || (insertMode is string strLineNum && int.TryParse(strLineNum, out lineNum)))
+            {
+                // Line number mode
+                var lines = File.ReadAllLines(normalizedPath).ToList();
+                if (lineNum < 0 || lineNum > lines.Count)
+                {
+                    return $"Error: Line number {lineNum} is out of range. File has {lines.Count} lines.";
+                }
+                lines.Insert(lineNum, newText);
+                newContent = string.Join(Environment.NewLine, lines);
+            }
+            else
+            {
+                return $"Error: Invalid insertMode: {insertMode}. Use \"end\" to append, or a line number.";
+            }
+
+            if (dryRun)
+            {
+                var diff = SearchService.GenerateDiff(originalContent, newContent);
+                return $"Dry run diff:\n{diff}";
+            }
+
+            File.WriteAllText(normalizedPath, newContent);
+
+            string modeDescription = insertMode is string && ((string)insertMode).Equals("end") ? "appended to" : $"inserted at line {insertMode} in";
             return $"Successfully {modeDescription} file {filePath}";
         }
         catch (Exception ex)
@@ -782,14 +806,14 @@ public static class FileService
             .Where(subDir => 
                 (includeGitFolders || !subDir.Name.Equals(".git", StringComparison.OrdinalIgnoreCase)) &&
                 (showHidden || (!subDir.Attributes.HasFlag(FileAttributes.Hidden) && !subDir.Name.StartsWith("."))) &&
-                (!respectGitignore || !GitignoreService.IsPathIgnored(subDir.FullName, true, gitignoreRules)))
+                (!respectGitignore || !GitignoreService.IsPathIgnored(subDir.FullName, true, gitignoreRules!)))
             .ToList();
             
         // Process files
         var files = directoryInfo.GetFiles()
             .Where(file => 
                 (showHidden || (!file.Attributes.HasFlag(FileAttributes.Hidden) && !file.Name.StartsWith("."))) &&
-                (!respectGitignore || !GitignoreService.IsPathIgnored(file.FullName, false, gitignoreRules)))
+                (!respectGitignore || !GitignoreService.IsPathIgnored(file.FullName, false, gitignoreRules!)))
             .ToList();
 
         // Add directories and files count
