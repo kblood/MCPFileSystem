@@ -133,7 +133,7 @@ public static class FileTools
         bool dryRun = false,
         [Description("How to insert: null for replace, \"end\" to append to file, or a line number to insert at")]
         object? insertMode = null) =>
-        FileService.EditFile(path, oldText, newText, dryRun, insertMode);
+        FileService.EditFile(path, oldText, newText, dryRun);
 
     /// <summary>
     /// Create a new directory or ensure a directory exists.
