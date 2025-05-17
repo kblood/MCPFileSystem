@@ -118,7 +118,6 @@ public static class FileTools
     /// <param name="oldText">Text to search for and replace. Can be null when using insertMode.</param>
     /// <param name="newText">Text to replace with or insert.</param>
     /// <param name="dryRun">Preview changes using git-style diff format.</param>
-    /// <param name="insertMode">How to insert: null for replace, "end" to append to file, or a line number to insert at.</param>
     /// <returns>Success message, diff result, or error message.</returns>
     [McpServerTool("edit_file")]
     [Description("Make line-based edits to a text file, including inserting at end or at specific lines.")]
@@ -130,9 +129,7 @@ public static class FileTools
         [Description("Text to replace with or insert")]
         string newText,
         [Description("Preview changes using git-style diff format")]
-        bool dryRun = false,
-        [Description("How to insert: null for replace, \"end\" to append to file, or a line number to insert at")]
-        object? insertMode = null) =>
+        bool dryRun = false) =>
         FileService.EditFile(path, oldText, newText, dryRun);
 
     /// <summary>
