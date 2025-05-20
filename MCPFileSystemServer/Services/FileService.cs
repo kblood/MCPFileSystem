@@ -1,4 +1,4 @@
-using MCPFileSystem.Contracts;
+﻿using MCPFileSystem.Contracts;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -329,7 +329,7 @@ namespace MCPFileSystemServer.Services
             await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
         }
 
-        // Updated EditFileAsync to use List<FileEdit> and dryRun
+        // Updated EditFileAsync to include SectionReplace functionality
         public async Task<EditResult> EditFileAsync(string path, List<FileEdit> edits, bool dryRun = false)
         {
             string fullPath = GetValidatedFullPath(path);
@@ -348,43 +348,94 @@ namespace MCPFileSystemServer.Services
                     originalContentForDiff = string.Join(Environment.NewLine, lines);
                 }
 
-
-                // Convert FileEdit to EditOperation for internal processing if needed, or adapt logic
-                // For now, assuming FileEdit has similar enough structure or adapting directly.
-                // The key difference is FileEdit.LineNumber (1-based) vs EditOperation.StartLine (0-based or 1-based depending on previous impl)
-                // And FileEdit.Text (string) vs EditOperation.Content (string[])
-                // Let's assume FileEdit.LineNumber is 1-based.
-
+                // Process edits in order by line number to ensure predictable results
                 foreach (var edit in edits.OrderBy(e => e.LineNumber))
                 {
                     int lineNumber0Based = edit.LineNumber - 1; // Convert to 0-based
                     if (lineNumber0Based < 0) lineNumber0Based = 0;
 
-                    switch (edit.Type.ToString().ToUpper()) // Use .ToString() before .ToUpper()
+                    switch (edit.Type)
                     {
-                        case "INSERT":
+                        case EditType.Insert:
                             if (lineNumber0Based > lines.Count) lineNumber0Based = lines.Count;
                             lines.Insert(lineNumber0Based, edit.Text ?? string.Empty);
                             editCount++;
                             break;
-                        case "DELETE":
-                            // FileEdit doesn't have an EndLine. Assuming it deletes a single line.
+                            
+                        case EditType.Delete:
                             if (lineNumber0Based < lines.Count)
                             {
                                 lines.RemoveAt(lineNumber0Based);
                                 editCount++;
                             }
                             break;
-                        case "REPLACE": // Assuming replace means replace a single line
+                            
+                        case EditType.Replace:
                             if (lineNumber0Based < lines.Count)
                             {
-                                lines[lineNumber0Based] = edit.Text ?? string.Empty;
+                                // If OldText is specified, only replace that part of the line
+                                if (!string.IsNullOrEmpty(edit.OldText) && lines[lineNumber0Based].Contains(edit.OldText))
+                                {
+                                    lines[lineNumber0Based] = lines[lineNumber0Based].Replace(edit.OldText, edit.Text ?? string.Empty);
+                                }
+                                else
+                                {
+                                    // Replace the entire line
+                                    lines[lineNumber0Based] = edit.Text ?? string.Empty;
+                                }
                                 editCount++;
                             }
                             else if (lineNumber0Based == lines.Count) // If replacing a line that doesn't exist, treat as append
                             {
                                 lines.Add(edit.Text ?? string.Empty);
                                 editCount++;
+                            }
+                            break;
+                            
+                        case EditType.ReplaceSection:
+                            // Handle section replacement
+                            if (edit.EndLine.HasValue && edit.EndLine.Value >= edit.LineNumber)
+                            {
+                                int endLine0Based = edit.EndLine.Value - 1; // Convert to 0-based
+                                
+                                // Ensure we don't go out of bounds
+                                if (lineNumber0Based < lines.Count)
+                                {
+                                    // Ensure endLine is within bounds
+                                    endLine0Based = Math.Min(endLine0Based, lines.Count - 1);
+                                    
+                                    // Calculate how many lines to remove
+                                    int linesToRemove = endLine0Based - lineNumber0Based + 1;
+                                    
+                                    // Remove the lines in the section
+                                    lines.RemoveRange(lineNumber0Based, linesToRemove);
+                                    
+                                    // If there's replacement text, split it into lines and insert
+                                    if (!string.IsNullOrEmpty(edit.Text))
+                                    {
+                                        string[] newLines = edit.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                                        for (int i = 0; i < newLines.Length; i++)
+                                        {
+                                            lines.Insert(lineNumber0Based + i, newLines[i]);
+                                        }
+                                    }
+                                    
+                                    editCount++;
+                                }
+                                else if (lineNumber0Based == lines.Count) // If replacing a section that doesn't exist, treat as append
+                                {
+                                    // If there's replacement text, split it into lines and append
+                                    if (!string.IsNullOrEmpty(edit.Text))
+                                    {
+                                        string[] newLines = edit.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                                        foreach (var line in newLines)
+                                        {
+                                            lines.Add(line);
+                                        }
+                                    }
+                                    
+                                    editCount++;
+                                }
                             }
                             break;
                     }

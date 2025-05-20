@@ -1,4 +1,4 @@
-namespace MCPFileSystem.Contracts;
+﻿namespace MCPFileSystem.Contracts;
 
 /// <summary>
 /// Represents an edit operation to be applied to a file.
@@ -10,6 +10,7 @@ public class FileEdit
     /// For inserting at the beginning of the file, use 1.
     /// For appending to the end of the file, use a number greater than the last line number, or int.MaxValue.
     /// For replacing or deleting a line, this is the line to target.
+    /// For ReplaceSection operations, this is the start line of the section to replace.
     /// </summary>
     public int LineNumber { get; set; }
 
@@ -28,9 +29,17 @@ public class FileEdit
     /// For replace operations, this is the text to find on the specified LineNumber.
     /// If null, the entire line specified by LineNumber is replaced with Text.
     /// If provided, only this specific string within the line is replaced.
+    /// For ReplaceSection operations, this is ignored.
     /// Not used for Insert or Delete operations.
     /// </summary>
-    public string? OldText { get; set; } 
+    public string? OldText { get; set; }
+
+    /// <summary>
+    /// For ReplaceSection operations, this is the ending line number (inclusive) of the section to replace.
+    /// Must be greater than or equal to LineNumber.
+    /// Not used for other operation types.
+    /// </summary>
+    public int? EndLine { get; set; }
 }
 
 /// <summary>
@@ -56,5 +65,12 @@ public enum EditType
     /// If OldText is null, the entire LineNumber is replaced with Text.
     /// If OldText is provided, only that part of the line is replaced with Text.
     /// </summary>
-    Replace
+    Replace,
+
+    /// <summary>
+    /// Replace a section of the file from LineNumber to EndLine (inclusive) with the new text.
+    /// The EndLine property must be set and must be >= LineNumber.
+    /// This allows for more efficient replacement of larger file sections.
+    /// </summary>
+    ReplaceSection
 }
