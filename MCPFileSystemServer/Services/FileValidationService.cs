@@ -25,7 +25,7 @@ public static class FileValidationService
     /// <summary>
     /// Gets all directories that are accessible for file operations.
     /// </summary>
-    public static IReadOnlyList<string> AccessibleDirectories => _accessibleDirectories.AsReadOnly();
+    public static IReadOnlyList<string> AllowedBaseDirectories => _accessibleDirectories.AsReadOnly();
 
     /// <summary>
     /// Sets the base directory for file operations.

@@ -1,5 +1,10 @@
 using System.Text;
-using MCPFileSystemServer.Models;
+using System.Text.RegularExpressions; // Added for Regex
+using MCPFileSystem.Contracts; // Changed from MCPFileSystemServer.Models
+using System.IO; // Added for Path, Directory, File, SearchOption etc.
+using System.Collections.Generic; // Added for List, Dictionary
+using System.Linq; // Added for Linq operations
+using System.Threading.Tasks; // Added for Task
 
 namespace MCPFileSystemServer.Services;
 
@@ -8,6 +13,90 @@ namespace MCPFileSystemServer.Services;
 /// </summary>
 public static class SearchService
 {
+    // New SearchAsync method to be called by FileService
+    public static async Task<IEnumerable<MCPFileSystem.Contracts.SearchResult>> SearchAsync(
+        string query,
+        string? filePattern = null,
+        bool caseSensitive = false,
+        bool useRegex = false,
+        string? searchPath = null) // searchPath is relative to FileValidationService.BaseDirectory
+    {
+        string baseSearchPath = FileValidationService.NormalizePath(searchPath ?? string.Empty);
+        var results = new List<MCPFileSystem.Contracts.SearchResult>();
+
+        // This is a simplified implementation. A more robust one would handle async file I/O properly.
+        await Task.Run(() =>
+        {
+            var files = Directory.GetFiles(baseSearchPath, filePattern ?? "*.*", SearchOption.AllDirectories);
+            List<GitignoreRule> gitignoreRules = GitignoreService.LoadGitignoreRules(baseSearchPath);
+
+            foreach (var filePath in files)
+            {
+                if (GitignoreService.IsPathIgnored(filePath, false, gitignoreRules))
+                {
+                    continue;
+                }
+
+                var fileInfo = new System.IO.FileInfo(filePath);
+                if (fileInfo.Length > 10 * 1024 * 1024) // Skip large files
+                {
+                    continue;
+                }
+
+                var matches = new List<MCPFileSystem.Contracts.SearchMatch>();
+                try
+                {
+                    string[] lines = File.ReadAllLines(filePath);
+                    for (int i = 0; i < lines.Length; i++)
+                    {
+                        bool isMatch = false;
+                        if (useRegex)
+                        {
+                            isMatch = Regex.IsMatch(lines[i], query, caseSensitive ? RegexOptions.None : RegexOptions.IgnoreCase);
+                        }
+                        else
+                        {
+                            isMatch = lines[i].Contains(query, caseSensitive ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase);
+                        }
+
+                        if (isMatch)
+                        {
+                            matches.Add(new MCPFileSystem.Contracts.SearchMatch
+                            {
+                                Line = i + 1,
+                                Text = lines[i].Trim()
+                            });
+                        }
+                    }
+
+                    if (matches.Any())
+                    {
+                        string relativeFilePath = filePath; // filePath is absolute
+                        if (filePath.StartsWith(FileValidationService.BaseDirectory, StringComparison.OrdinalIgnoreCase))
+                        {
+                            relativeFilePath = filePath.Substring(FileValidationService.BaseDirectory.Length);
+                            relativeFilePath = relativeFilePath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                        }
+                        // else: path is not under BaseDirectory, preserve it or log an error if this state is unexpected.
+
+                        results.Add(new MCPFileSystem.Contracts.SearchResult
+                        {
+                            Path = relativeFilePath,
+                            Matches = matches,
+                            Type = "file" 
+                        });
+                    }
+                }
+                catch (Exception) 
+                {
+                    // Skip files that can't be read or processed
+                }
+            }
+        });
+        return results;
+    }
+
+
     /// <summary>
     /// Searches for text in all files within a directory.
     /// </summary>
@@ -17,7 +106,7 @@ public static class SearchService
     /// <param name="recursive">Whether to search subdirectories.</param>
     /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
     /// <returns>A dictionary with search results.</returns>
-    public static Dictionary<string, List<SearchMatch>> SearchTextInFiles(string directory, string searchText, string filePattern = "*.*", bool recursive = true, bool respectGitignore = true)
+    public static Dictionary<string, List<MCPFileSystem.Contracts.SearchMatch>> SearchTextInFiles(string directory, string searchText, string filePattern = "*.*", bool recursive = true, bool respectGitignore = true)
     {
         try
         {
@@ -25,57 +114,49 @@ public static class SearchService
 
             if (!Directory.Exists(normalizedPath))
             {
-                return new Dictionary<string, List<SearchMatch>> 
+                return new Dictionary<string, List<MCPFileSystem.Contracts.SearchMatch>>
                 {
-                    ["error"] = new List<SearchMatch> { new SearchMatch { Line = -1, Text = $"Directory not found: {directory}" } }
+                    ["error"] = new List<MCPFileSystem.Contracts.SearchMatch> { new MCPFileSystem.Contracts.SearchMatch { Line = -1, Text = $"Directory not found: {directory}" } }
                 };
             }
 
             if (string.IsNullOrEmpty(searchText))
             {
-                return new Dictionary<string, List<SearchMatch>> 
+                return new Dictionary<string, List<MCPFileSystem.Contracts.SearchMatch>>
                 {
-                    ["error"] = new List<SearchMatch> { new SearchMatch { Line = -1, Text = "Search text cannot be empty" } }
+                    ["error"] = new List<MCPFileSystem.Contracts.SearchMatch> { new MCPFileSystem.Contracts.SearchMatch { Line = -1, Text = "Search text cannot be empty" } }
                 };
             }
 
-            var results = new Dictionary<string, List<SearchMatch>>();
+            var results = new Dictionary<string, List<MCPFileSystem.Contracts.SearchMatch>>();
             var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
             var files = Directory.GetFiles(normalizedPath, filePattern, searchOption);
             
-            // Load gitignore rules if needed
-            List<GitignoreRule> gitignoreRules = null;
-            if (respectGitignore)
-            {
-                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
-            }
+            List<GitignoreRule> gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
 
             foreach (var file in files)
             {
                 try
                 {
-                    // Skip files that match gitignore patterns
                     if (respectGitignore && GitignoreService.IsPathIgnored(file, false, gitignoreRules))
                     {
                         continue;
                     }
                     
-                    // Skip binary files or files that are too large
                     var fileInfo = new System.IO.FileInfo(file);
-                    if (fileInfo.Length > 10 * 1024 * 1024) // Skip files larger than 10MB
+                    if (fileInfo.Length > 10 * 1024 * 1024) 
                     {
                         continue;
                     }
 
-                    // Read text file and search line by line
-                    var fileMatches = new List<SearchMatch>();
+                    var fileMatches = new List<MCPFileSystem.Contracts.SearchMatch>();
                     string[] lines = File.ReadAllLines(file);
 
                     for (int i = 0; i < lines.Length; i++)
                     {
                         if (lines[i].Contains(searchText, StringComparison.OrdinalIgnoreCase))
                         {
-                            fileMatches.Add(new SearchMatch
+                            fileMatches.Add(new MCPFileSystem.Contracts.SearchMatch
                             {
                                 Line = i + 1,
                                 Text = lines[i].Trim()
@@ -85,23 +166,25 @@ public static class SearchService
 
                     if (fileMatches.Count > 0)
                     {
-                        results[file] = fileMatches;
+                        // Path returned in dictionary key should be relative to FileValidationService.BaseDirectory
+                        string relativeKeyPath = file.StartsWith(FileValidationService.BaseDirectory) ? 
+                                                 file.Substring(FileValidationService.BaseDirectory.Length).TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) :
+                                                 file;
+                        results[relativeKeyPath] = fileMatches;
                     }
                 }
-                catch (Exception ex)
+                catch (Exception) 
                 {
-                    // Skip files that can't be read
                     continue;
                 }
             }
-
             return results;
         }
         catch (Exception ex)
         {
-            return new Dictionary<string, List<SearchMatch>> 
+            return new Dictionary<string, List<MCPFileSystem.Contracts.SearchMatch>>
             {
-                ["error"] = new List<SearchMatch> { new SearchMatch { Line = -1, Text = ex.Message } }
+                ["error"] = new List<MCPFileSystem.Contracts.SearchMatch> { new MCPFileSystem.Contracts.SearchMatch { Line = -1, Text = ex.Message } }
             };
         }
     }
@@ -137,18 +220,21 @@ public static class SearchService
             var searchOption = recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly;
             var files = Directory.GetFiles(normalizedPath, filePattern, searchOption);
             
-            // Load gitignore rules if needed
-            List<GitignoreRule> gitignoreRules = null;
-            if (respectGitignore)
+            // Ensure gitignoreRules is always initialized to a non-null list.
+            List<GitignoreRule> gitignoreRules = respectGitignore 
+                                                ? GitignoreService.LoadGitignoreRules(normalizedPath) 
+                                                : new List<GitignoreRule>();
+            // If LoadGitignoreRules could somehow still return null (it shouldn't based on its code), ensure it's an empty list.
+            if (gitignoreRules == null) 
             {
-                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
+                gitignoreRules = new List<GitignoreRule>();
             }
 
             foreach (var file in files)
             {
                 try
                 {
-                    // Skip files that match gitignore patterns
+                    // No need for gitignoreRules null check here if it's guaranteed to be non-null by initialization.
                     if (respectGitignore && GitignoreService.IsPathIgnored(file, false, gitignoreRules))
                     {
                         continue;
@@ -204,7 +290,7 @@ public static class SearchService
     /// <param name="excludePatterns">Optional patterns to exclude.</param>
     /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
     /// <returns>An array of file paths matching the search criteria.</returns>
-    public static string[] SearchFiles(string directory, string pattern, string[] excludePatterns = null, bool respectGitignore = true)
+    public static string[] SearchFiles(string directory, string pattern, string[]? excludePatterns = null, bool respectGitignore = true)
     {
         try
         {
@@ -212,48 +298,133 @@ public static class SearchService
 
             if (!Directory.Exists(normalizedPath))
             {
-                return new[] { $"Error: Directory not found: {directory}" };
+                return Array.Empty<string>(); // Changed: Return empty array
             }
             
-            // Load gitignore rules if needed
-            List<GitignoreRule> gitignoreRules = null;
-            if (respectGitignore)
-            {
-                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
-            }
+            // Initialize with an empty list if no .gitignore file is found or if respectGitignore is false.
+            List<GitignoreRule> gitignoreRules = respectGitignore ? GitignoreService.LoadGitignoreRules(normalizedPath) : new List<GitignoreRule>();
 
-            var files = Directory.GetFiles(normalizedPath, $"*{pattern}*", SearchOption.AllDirectories);
+
+            var filesToSearch = Directory.GetFiles(normalizedPath, pattern, SearchOption.AllDirectories); // Changed: Use pattern directly
             
-            // Apply filters
-            var filteredFiles = files.Where(file =>
+            var filteredFiles = filesToSearch.Where(file =>
             {
-                // Check gitignore rules
-                if (respectGitignore && gitignoreRules != null && 
-                    GitignoreService.IsPathIgnored(file, false, gitignoreRules))
+                // Ensure gitignoreRules is not null before calling IsPathIgnored
+                if (respectGitignore && gitignoreRules != null && GitignoreService.IsPathIgnored(file, false, gitignoreRules))
                 {
                     return false;
                 }
                 
-                // Check exclude patterns
                 if (excludePatterns != null && excludePatterns.Length > 0)
                 {
                     var fileName = Path.GetFileName(file);
-                    if (excludePatterns.Any(p => fileName.Contains(p)))
+                    if (excludePatterns.Any(p => fileName.Contains(p))) // Existing logic, consider if needs more robust matching
                     {
                         return false;
                     }
                 }
                 
                 return true;
-            }).ToArray();
+            })
+            .Select(absPath => { // Changed: Make paths relative to BaseDirectory
+                string relPath = absPath;
+                if (absPath.StartsWith(FileValidationService.BaseDirectory, StringComparison.OrdinalIgnoreCase))
+                {
+                    relPath = absPath.Substring(FileValidationService.BaseDirectory.Length);
+                    relPath = relPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                }
+                return relPath;
+            })
+            .ToArray();
 
             return filteredFiles;
         }
         catch (Exception ex)
         {
-            return new[] { $"Error: {ex.Message}" };
+            Console.Error.WriteLine($"Error in SearchFiles (\"{directory}\", \"{pattern}\"): {ex.Message}"); // Changed: Log error
+            return Array.Empty<string>(); // Changed: Return empty array
         }
     }
+
+    /// <summary>
+    /// Asynchronously searches for files matching a pattern.
+    /// </summary>
+    /// <param name="directory">The directory to search in (relative to BaseDirectory or absolute if validated).</param>
+    /// <param name="pattern">The search pattern (e.g., \"*.txt\").</param>
+    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <param name="excludePatterns">Optional patterns to exclude files.</param>
+    /// <returns>An array of relative file paths matching the search criteria.</returns>
+    public static async Task<string[]> SearchFilesAsync(string directory, string pattern, bool respectGitignore, string[]? excludePatterns = null)
+    {
+        return await Task.Run(() =>
+        {
+            try
+            {
+                // NormalizePath expects a path relative to BaseDirectory or an allowed absolute path.
+                // If 'directory' is intended to be always relative to BaseDirectory, it should be prefixed.
+                // For now, assuming 'directory' is already a validated, accessible path.
+                string validatedPath = FileValidationService.NormalizePath(directory);
+
+                if (!Directory.Exists(validatedPath))
+                {
+                    // Consider logging this or throwing a specific exception
+                    return Array.Empty<string>();
+                }
+
+                List<GitignoreRule> gitignoreRules = respectGitignore ? GitignoreService.LoadGitignoreRules(validatedPath) : new List<GitignoreRule>();
+                if (gitignoreRules == null) gitignoreRules = new List<GitignoreRule>(); // Ensure not null
+
+                var filesToSearch = Directory.EnumerateFiles(validatedPath, pattern, SearchOption.AllDirectories);
+
+                var filteredFiles = filesToSearch.Where(filePath =>
+                {
+                    if (respectGitignore && GitignoreService.IsPathIgnored(filePath, false, gitignoreRules))
+                    {
+                        return false;
+                    }
+
+                    if (excludePatterns != null && excludePatterns.Length > 0)
+                    {
+                        var fileName = Path.GetFileName(filePath);
+                        // Simple exclusion, might need more robust globbing for exclude patterns
+                        if (excludePatterns.Any(p => fileName.Contains(p, StringComparison.OrdinalIgnoreCase) || 
+                                                     (p.StartsWith("*.") && fileName.EndsWith(p.Substring(1), StringComparison.OrdinalIgnoreCase))))
+                        {
+                            return false;
+                        }
+                    }
+                    return true;
+                })
+                .Select(absPath =>
+                {
+                    // Ensure paths are relative to the original 'directory' parameter if it was relative,
+                    // or to the BaseDirectory if 'directory' was absolute but within it.
+                    // For simplicity and consistency with other parts, let's make it relative to BaseDirectory.
+                    string relPath = absPath;
+                    if (absPath.StartsWith(FileValidationService.BaseDirectory, StringComparison.OrdinalIgnoreCase))
+                    {
+                        relPath = absPath.Substring(FileValidationService.BaseDirectory.Length);
+                        relPath = relPath.TrimStart(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                    }
+                    // If absPath is not under BaseDirectory but was validated (e.g. an explicitly allowed path),
+                    // then the path should remain absolute or be made relative to that allowed path.
+                    // Current FileValidationService primarily works with one BaseDirectory.
+                    // This logic assumes paths are within or relative to BaseDirectory.
+                    return relPath;
+                })
+                .ToArray();
+
+                return filteredFiles;
+            }
+            catch (Exception ex)
+            {
+                // Log the exception (e.g., using a proper logging framework)
+                Console.Error.WriteLine($"Error in SearchFilesAsync (directory: \"{directory}\", pattern: \"{pattern}\"): {ex.Message}");
+                return Array.Empty<string>(); // Return empty on error
+            }
+        });
+    }
+
 
     /// <summary>
     /// Generates a line-based diff between two text contents.

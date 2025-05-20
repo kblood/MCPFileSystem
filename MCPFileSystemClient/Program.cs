@@ -172,48 +172,57 @@ namespace MCPFileSystem.Client
             }
         }
 
-        public async Task<string> ReadFileAsync(string path)
+        // Updated to support line ranges and use the new ReadFileResponse
+        public async Task<ReadFileResponse> ReadFileAsync(string path, int? startLine = null, int? endLine = null)
         {
             try
             {
-                Console.WriteLine($"ReadFileAsync: {path}");
-                var parameters = JsonSerializer.Serialize(new { path });
-                var response = await SendMCPRequestAsync("read", parameters);
+                Console.WriteLine($"ReadFileAsync: {path}, StartLine: {startLine}, EndLine: {endLine}");
+                var parameters = JsonSerializer.Serialize(new { path, startLine, endLine });
+                var response = await SendMCPRequestAsync("read", parameters); // Assuming server "read" command handles these
                 var parsedResponse = ParseResponse(response);
-                
+
                 if (!parsedResponse.IsSuccess)
                 {
                     throw new Exception($"Failed to read file: {parsedResponse.Data}");
                 }
-                
+
                 if (string.IsNullOrEmpty(parsedResponse.Data))
                 {
                     Console.WriteLine("WARNING: Empty data in response for ReadFileAsync");
-                    return string.Empty;
+                    return new ReadFileResponse { FilePath = path, ErrorMessage = "Empty response data." };
                 }
-                
+
                 try
                 {
                     var options = new JsonSerializerOptions
                     {
                         PropertyNameCaseInsensitive = true
                     };
-                    
+
                     var result = JsonSerializer.Deserialize<ReadFileResponse>(parsedResponse.Data, options);
                     if (result == null)
                     {
-                        return string.Empty;
+                        return new ReadFileResponse { FilePath = path, ErrorMessage = "Failed to deserialize response." };
                     }
                     
-                    // Handle different encodings
-                    if (result.Encoding == "base64" && !string.IsNullOrEmpty(result.Content))
+                    // Server might still send base64 for full file reads if that logic remains,
+                    // but primary focus is now on Lines for ranged reads.
+                    if (result.Lines == null && result.Encoding == "base64" && !string.IsNullOrEmpty(parsedResponse.Data)) // Check raw data for old 'Content'
                     {
-                        Console.WriteLine("Decoding base64 content...");
-                        byte[] bytes = Convert.FromBase64String(result.Content);
-                        return Encoding.UTF8.GetString(bytes);
+                        // Attempt to parse old format if new 'Lines' is null
+                        var oldFormat = JsonSerializer.Deserialize<OldReadFileResponseHelper>(parsedResponse.Data, options);
+                        if (oldFormat?.Content != null && oldFormat.Encoding == "base64")
+                        {
+                             Console.WriteLine("Decoding base64 content from old format...");
+                             byte[] bytes = Convert.FromBase64String(oldFormat.Content);
+                             result.Lines = Encoding.UTF8.GetString(bytes).Split(Environment.NewLine);
+                             result.TotalLines = result.Lines.Length;
+                             result.StartLine = 1;
+                             result.EndLine = result.TotalLines;
+                        }
                     }
-                    
-                    return result.Content ?? string.Empty;
+                    return result;
                 }
                 catch (JsonException je)
                 {
@@ -227,6 +236,13 @@ namespace MCPFileSystem.Client
                 Console.WriteLine($"ERROR in ReadFileAsync: {ex.GetType().Name}: {ex.Message}");
                 throw;
             }
+        }
+
+        // Helper class for backward compatibility if server sends old ReadFileResponse format
+        private class OldReadFileResponseHelper
+        {
+            public string? Content { get; set; }
+            public string? Encoding { get; set; }
         }
 
         public async Task WriteFileAsync(string path, string content, string encoding = "utf8")
@@ -372,6 +388,50 @@ namespace MCPFileSystem.Client
             catch (Exception ex)
             {
                 Console.WriteLine($"ERROR in GetFileInfoAsync: {ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
+        }
+        
+        public async Task CopyFileAsync(string sourceFilePath, string destinationFilePath, bool overwrite)
+        {
+            try
+            {
+                Console.WriteLine($"CopyFileAsync: from {sourceFilePath} to {destinationFilePath}, overwrite: {overwrite}");
+                var parameters = JsonSerializer.Serialize(new { sourceFilePath, destinationFilePath, overwrite });
+                var response = await SendMCPRequestAsync("copyfile", parameters); // New server command
+                var parsedResponse = ParseResponse(response);
+
+                if (!parsedResponse.IsSuccess)
+                {
+                    throw new Exception($"Failed to copy file: {parsedResponse.Data}");
+                }
+                Console.WriteLine($"File copied successfully from {sourceFilePath} to {destinationFilePath}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in CopyFileAsync: {ex.GetType().Name}: {ex.Message}");
+                throw;
+            }
+        }
+
+        public async Task CopyDirectoryAsync(string sourceDir, string destDir, bool overwriteFiles, bool respectGitignore)
+        {
+            try
+            {
+                Console.WriteLine($"CopyDirectoryAsync: from {sourceDir} to {destDir}, overwriteFiles: {overwriteFiles}, respectGitignore: {respectGitignore}");
+                var parameters = JsonSerializer.Serialize(new { sourceDir, destDir, overwriteFiles, respectGitignore });
+                var response = await SendMCPRequestAsync("copydir", parameters); // New server command
+                var parsedResponse = ParseResponse(response);
+
+                if (!parsedResponse.IsSuccess)
+                {
+                    throw new Exception($"Failed to copy directory: {parsedResponse.Data}");
+                }
+                Console.WriteLine($"Directory copied successfully from {sourceDir} to {destDir}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"ERROR in CopyDirectoryAsync: {ex.GetType().Name}: {ex.Message}");
                 throw;
             }
         }
@@ -630,10 +690,19 @@ namespace MCPFileSystem.Client
         }
     }
 
+    // Updated to match MCPFileSystem.Contracts.ReadFileResponse
     public class ReadFileResponse
     {
-        public string? Content { get; set; }
-        public string? Encoding { get; set; }
+        public string? FilePath { get; set; }
+        public string[]? Lines { get; set; }
+        public int StartLine { get; set; }
+        public int EndLine { get; set; }
+        public int TotalLines { get; set; }
+        public string? FileSHA { get; set; }
+        public string? ErrorMessage { get; set; }
+        // For compatibility with old client logic that expected a single Content string
+        public string? Content => Lines != null ? string.Join(Environment.NewLine, Lines) : null;
+        public string? Encoding { get; set; } // Retained if server sends it, though new contract focuses on Lines
     }
 
     public class PathInfo
@@ -766,10 +835,37 @@ namespace MCPFileSystem.Client
                             break;
                         
                         case "read":
-                            var content = await client.ReadFileAsync(arg);
-                            Console.WriteLine($"Content of {arg}:");
+                            var readArgs = arg.Split(' ');
+                            string readFile = readArgs[0];
+                            int? startLine = null;
+                            int? endLine = null;
+                            if (readArgs.Length >= 2 && int.TryParse(readArgs[1], out int sl))
+                            {
+                                startLine = sl;
+                            }
+                            if (readArgs.Length >= 3 && int.TryParse(readArgs[2], out int el))
+                            {
+                                endLine = el;
+                            }
+
+                            var fileReadResponse = await client.ReadFileAsync(readFile, startLine, endLine);
+                            Console.WriteLine($"Content of {fileReadResponse.FilePath} (Lines: {fileReadResponse.StartLine}-{fileReadResponse.EndLine} of {fileReadResponse.TotalLines}, SHA: {fileReadResponse.FileSHA}):");
                             Console.WriteLine("--------------------------------------------------");
-                            Console.WriteLine(content);
+                            if (fileReadResponse.Lines != null)
+                            {
+                                foreach(var responseLine in fileReadResponse.Lines)
+                                {
+                                    Console.WriteLine(responseLine);
+                                }
+                            }
+                            else if (!string.IsNullOrEmpty(fileReadResponse.ErrorMessage))
+                            {
+                                Console.WriteLine($"Error: {fileReadResponse.ErrorMessage}");
+                            }
+                            else
+                            {
+                                Console.WriteLine("(No content returned or content was empty)");
+                            }
                             break;
                         
                         case "write":
@@ -886,6 +982,34 @@ namespace MCPFileSystem.Client
                             Console.WriteLine($"Moved {source} to {destination}");
                             break;
                             
+                        case "cp": // New command for CopyFileAsync
+                            parts = arg.Split(' ');
+                            if (parts.Length < 2)
+                            {
+                                Console.WriteLine("Usage: cp <sourceFile> <destinationFile> [--overwrite]");
+                                break;
+                            }
+                            string sourceFile = parts[0];
+                            string destFile = parts[1];
+                            bool overwrite = parts.Length > 2 && parts[2].ToLower() == "--overwrite";
+                            await client.CopyFileAsync(sourceFile, destFile, overwrite);
+                            break;
+
+                        case "cpdir": // New command for CopyDirectoryAsync
+                            parts = arg.Split(' ');
+                            if (parts.Length < 2)
+                            {
+                                Console.WriteLine("Usage: cpdir <sourceDir> <destDir> [--overwrite] [--no-gitignore]");
+                                break;
+                            }
+                            string sourceDir = parts[0];
+                            string destDir = parts[1];
+                            bool overwriteFiles = arg.Contains("--overwrite");
+                            bool respectGitignoreCp = !arg.Contains("--no-gitignore");
+                            
+                            await client.CopyDirectoryAsync(sourceDir, destDir, overwriteFiles, respectGitignoreCp);
+                            break;
+
                         case "edit":
                             parts = arg.Split(' ', 2);
                             if (parts.Length < 2)
@@ -944,9 +1068,9 @@ namespace MCPFileSystem.Client
             Console.WriteLine("Available commands:");
             Console.WriteLine("  help                 - Show this help");
             Console.WriteLine("  exit                 - Exit the client");
-            Console.WriteLine("  ls [path]            - List directory contents");
-            Console.WriteLine("  read <path>          - Read file content");
-            Console.WriteLine("  write <path>         - Write to file (press Ctrl+Z to finish input)");
+            Console.WriteLine("  ls [path] [--no-ignore] - List directory contents");
+            Console.WriteLine("  read <path> [startLine] [endLine] - Read file content or specific lines");
+            Console.WriteLine("  write <path>         - Write to file (press Ctrl+Z/Ctrl+D to finish input)");
             Console.WriteLine("  rm <path>            - Delete a file");
             Console.WriteLine("  mkdir <path>         - Create a directory");
             Console.WriteLine("  rmdir <path>         - Delete a directory");
@@ -958,7 +1082,9 @@ namespace MCPFileSystem.Client
             Console.WriteLine("           --show-git     - Show .git folders");
             Console.WriteLine("  search <path> <pat>  - Search for files matching pattern");
             Console.WriteLine("  move <src> <dst>     - Move/rename file or directory");
-            Console.WriteLine("  edit <path> <o>:<n>  - Edit file (replace old:new text)");
+            Console.WriteLine("  cp <srcFile> <dstFile> [--overwrite] - Copy a file");
+            Console.WriteLine("  cpdir <srcDir> <dstDir> [--overwrite] [--no-gitignore] - Copy a directory");
+            Console.WriteLine("  edit <path> <o>:<n>  - Edit file (replace old:new text - basic implementation)");
             Console.WriteLine("  dirs                 - List accessible directories");
         }
         

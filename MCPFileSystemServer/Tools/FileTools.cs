@@ -1,8 +1,11 @@
 using ModelContextProtocol.Server;
 using MCPFileSystemServer.Services;
-using MCPFileSystemServer.Models;
 using System.ComponentModel;
 using System.Text.Json;
+using MCPFileSystem.Contracts;
+using System.Linq;
+using System.Threading.Tasks; // Added for Task
+using System.Collections.Generic; // Added for List
 
 namespace MCPFileSystemServer.Tools;
 
@@ -17,30 +20,46 @@ public static class FileTools
     /// </summary>
     private static readonly JsonSerializerOptions DefaultJsonOptions = new()
     {
-        WriteIndented = true
+        WriteIndented = true,
+        // Handle potential nulls gracefully if needed, though contracts should be robust
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull 
     };
+
+    private static FileService GetFileService()
+    {
+        // Ensure FileValidationService.BaseDirectory is initialized before creating FileService instance.
+        // This might require an explicit initialization call if not already done,
+        // or ensuring SetBaseDirectory tool is called first by the client.
+        // For now, assuming BaseDirectory is valid.
+        if (string.IsNullOrEmpty(FileValidationService.BaseDirectory))
+        {
+            // Attempt to set a default if possible, or throw a clear exception.
+            // This depends on application design. For now, let's assume it must be set.
+            throw new InvalidOperationException("BaseDirectory is not set. Please call set_base_directory first.");
+        }
+        return new FileService(FileValidationService.BaseDirectory);
+    }
 
     /// <summary>
     /// Lists all files in the specified directory.
     /// </summary>
-    /// <param name="directoryPath">Absolute path to the directory containing the files.</param>
+    /// <param name=\"directoryPath\">Absolute path to the directory containing the files.</param>
+    /// <param name=\"respectGitignore\">Whether to respect .gitignore rules.</param>
     /// <returns>A JSON string containing an array of file paths.</returns>
     [McpServerTool("list_files")]
-    [Description("Lists all files in the specified directory.")]
-    public static string ListFiles(
-        [Description("Absolute path to the directory containing the files")]
+    [Description("Lists all files (non-recursively) in the specified directory, returning their paths.")]
+    public static async Task<string> ListFiles(
+        [Description("Absolute path to the directory")]
         string directoryPath,
         [Description("Whether to respect .gitignore rules")]
-        bool respectGitignore = true) 
+        bool respectGitignore = true)
     {
-        try 
+        try
         {
-            var files = FileService.ListFiles(directoryPath, respectGitignore);
-            if (files.Length > 0 && files[0].StartsWith("Error:")) 
-            {
-                return JsonSerializer.Serialize(new { error = files[0] }, DefaultJsonOptions);
-            }
-            return JsonSerializer.Serialize(files, DefaultJsonOptions);
+            var fileService = GetFileService();
+            var contents = await fileService.ListDirectoryContentsAsync(directoryPath, respectGitignore);
+            var filePaths = contents.Where(entry => !entry.IsDirectory).Select(entry => entry.Path);
+            return JsonSerializer.Serialize(filePaths, DefaultJsonOptions);
         }
         catch (Exception ex)
         {
@@ -51,24 +70,21 @@ public static class FileTools
     /// <summary>
     /// Lists all files and directories within the specified directory with detailed information.
     /// </summary>
-    /// <param name="directoryPath">Path to list contents of.</param>
-    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <param name=\"directoryPath\">Path to list contents of.</param>
+    /// <param name=\"respectGitignore\">Whether to respect .gitignore rules.</param>
     /// <returns>JSON string with directories and files in an efficient format.</returns>
     [McpServerTool("list_contents")]
     [Description("Lists all files and directories within the specified directory with detailed information.")]
-    public static string ListContents(
+    public static async Task<string> ListContents(
         [Description("Path to list contents of")]
         string directoryPath,
         [Description("Whether to respect .gitignore rules")]
         bool respectGitignore = true)
     {
-        try 
+        try
         {
-            var contents = FileService.ListDirectoryContents(directoryPath, respectGitignore);
-            if (contents.Length > 0 && contents[0].StartsWith("Error:")) 
-            {
-                return JsonSerializer.Serialize(new { error = contents[0] }, DefaultJsonOptions);
-            }
+            var fileService = GetFileService();
+            var contents = await fileService.ListDirectoryContentsAsync(directoryPath, respectGitignore);
             return JsonSerializer.Serialize(contents, DefaultJsonOptions);
         }
         catch (Exception ex)
@@ -80,233 +96,412 @@ public static class FileTools
     /// <summary>
     /// Reads and returns the contents of a specified file.
     /// </summary>
-    /// <param name="filePath">Absolute path to the file to read.</param>
+    /// <param name=\"filePath\">Absolute path to the file to read.</param>
+    /// <param name=\"startLine\">Optional start line (1-based).</param>
+    /// <param name=\"endLine\">Optional end line (1-based).</param>
     /// <returns>The contents of the file, or an error message if the file cannot be read.</returns>
     [McpServerTool("read_file")]
     [Description("Reads and returns the contents of a specified file.")]
-    public static string ReadFile(
+    public static async Task<string> ReadFile(
         [Description("Absolute path to the file to read")]
-        string filePath)
+        string filePath,
+        [Description("Optional start line (1-based) to read from.")]
+        int? startLine = null,
+        [Description("Optional end line (1-based) to read up to (inclusive).")]
+        int? endLine = null)
     {
-        var content = FileService.OpenFile(filePath);
-        if (content.StartsWith("Error:"))
+        try
         {
-            return JsonSerializer.Serialize(new { error = content }, DefaultJsonOptions);
+            var fileService = GetFileService();
+            ReadFileResponse response = await fileService.ReadFileAsync(filePath, startLine, endLine);
+            return JsonSerializer.Serialize(response, DefaultJsonOptions);
         }
-        return JsonSerializer.Serialize(new { content }, DefaultJsonOptions);
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
     }
 
     /// <summary>
     /// Creates a new file or completely overwrites an existing file with new content.
     /// </summary>
-    /// <param name="path">Path to the file to create or overwrite.</param>
-    /// <param name="content">Content to write to the file.</param>
+    /// <param name=\"path\">Path to the file to create or overwrite.</param>
+    /// <param name=\"content\">Content to write to the file.</param>
     /// <returns>Success or error message.</returns>
     [McpServerTool("write_file")]
     [Description("Create a new file or completely overwrite an existing file with new content.")]
-    public static string WriteFile(
+    public static async Task<string> WriteFile(
         [Description("Path to the file to create or overwrite")]
         string path,
         [Description("Content to write to the file")]
-        string content) =>
-        FileService.WriteFile(path, content);
+        string content)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            await fileService.WriteFileAsync(path, content);
+            // After writing, get file info to return SHA and other details
+            var fileInfo = await fileService.GetFileInfoAsync(path);
+            var sha = string.Empty;
+            if (fileInfo.Exists) // Attempt to get SHA if file was successfully written
+            {
+                 // FileService.GetFileInfoAsync doesn't return SHA. ReadFileResponse does.
+                 // To get SHA, we might need to call ReadFileAsync for the first line or a helper.
+                 // For simplicity, let's assume WriteFileAsync could return some confirmation.
+                 // Or, we can call ReadFileAsync with minimal range if SHA is strictly needed here.
+                 // Let's call ReadFileAsync to get the SHA.
+                var readResponse = await fileService.ReadFileAsync(path, 1, 1); // Read first line to get SHA
+                sha = readResponse.FileSHA;
+            }
+            return JsonSerializer.Serialize(new { message = "File written successfully.", path = path, sha = sha }, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
-    /// Make line-based edits to a text file, including inserting at end or at specific lines.
+    /// Make line-based edits to a text file.
     /// </summary>
-    /// <param name="path">Path to the file to edit.</param>
-    /// <param name="oldText">Text to search for and replace. Can be null when using insertMode.</param>
-    /// <param name="newText">Text to replace with or insert.</param>
-    /// <param name="dryRun">Preview changes using git-style diff format.</param>
+    /// <param name=\"path\">Path to the file to edit.</param>
+    /// <param name=\"editsJson\">A JSON string representing a list of edits to apply.</param>
+    /// <param name=\"dryRun\">Preview changes using git-style diff format.</param>
     /// <returns>Success message, diff result, or error message.</returns>
     [McpServerTool("edit_file")]
-    [Description("Make line-based edits to a text file, including inserting at end or at specific lines.")]
-    public static string EditFile(
+    [Description("Make line-based edits to a text file. Edits should be a JSON string: '[{\"LineNumber\":1,\"Type\":\"INSERT\",\"Text\":\"new line\"}]'")]
+    public static async Task<string> EditFile(
         [Description("Path to the file to edit")]
         string path,
-        [Description("Text to search for and replace. Can be null when using insertMode")]
-        string? oldText,
-        [Description("Text to replace with or insert")]
-        string newText,
-        [Description("Preview changes using git-style diff format")]
-        bool dryRun = false) =>
-        FileService.EditFile(path, oldText, newText, dryRun);
+        [Description("A JSON string representing a list of edits to apply. Each edit specifies LineNumber (1-based), Type (INSERT, DELETE, REPLACE) and Text.")]
+        string editsJson, // Changed to string to accept JSON
+        [Description("Preview changes (if applicable, service might not support diff for all edit types)")]
+        bool dryRun = false)
+    {
+        try
+        {
+            List<FileEdit>? edits;
+            try
+            {
+                edits = JsonSerializer.Deserialize<List<FileEdit>>(editsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                if (edits == null || !edits.Any())
+                {
+                    return JsonSerializer.Serialize(new { error = "Edits list cannot be null or empty." }, DefaultJsonOptions);
+                }
+            }
+            catch (JsonException jsonEx)
+            {
+                return JsonSerializer.Serialize(new { error = $"Invalid JSON format for edits: {jsonEx.Message}" }, DefaultJsonOptions);
+            }
+            
+            var fileService = GetFileService();
+            EditResult result = await fileService.EditFileAsync(path, edits, dryRun);
+            return JsonSerializer.Serialize(result, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
     /// Create a new directory or ensure a directory exists.
     /// </summary>
-    /// <param name="path">Path for the directory to create.</param>
+    /// <param name=\"path\">Path for the directory to create.</param>
     /// <returns>Success or error message.</returns>
     [McpServerTool("create_directory")]
     [Description("Create a new directory or ensure a directory exists.")]
-    public static string CreateDirectory(
+    public static async Task<string> CreateDirectory(
         [Description("Path for the directory to create")]
-        string path) =>
-        FileService.CreateDirectory(path);
+        string path)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            DirectoryInfoContract dirInfo = await fileService.CreateDirectoryAsync(path);
+            // Corrected: Use FullName instead of Path, as DirectoryInfoContract has FullName
+            return JsonSerializer.Serialize(new { message = "Directory created successfully.", path = dirInfo.FullName, name = dirInfo.Name, creationTime = dirInfo.CreationTime }, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
-    /// Get a detailed listing of all files and directories in a specified path.
+    /// Get a detailed listing of all files and directories in a specified path. (This is similar to ListContents)
     /// </summary>
-    /// <param name="path">Path to list contents of.</param>
+    /// <param name=\"path\">Path to list contents of.</param>
+    /// <param name=\"respectGitignore\">Whether to respect .gitignore rules.</param>
     /// <returns>JSON string with directory contents.</returns>
     [McpServerTool("list_directory")]
     [Description("Get a detailed listing of all files and directories in a specified path.")]
-    public static string ListDirectory(
+    public static async Task<string> ListDirectory(
         [Description("Path to list contents of")]
         string path,
         [Description("Whether to respect .gitignore rules")]
         bool respectGitignore = true) =>
-        JsonSerializer.Serialize(FileService.ListDirectories(path, respectGitignore).Concat(FileService.ListFiles(path, respectGitignore)).ToArray(), DefaultJsonOptions);
+        await ListContents(path, respectGitignore); // Delegate to ListContents
 
     /// <summary>
     /// Get a recursive tree view of files and directories as a JSON structure.
     /// </summary>
-    /// <param name="path">Path to the root directory.</param>
+    /// <param name=\"path\">Path to the root directory.</param>
+    /// <param name=\"respectGitignore\">Whether to respect .gitignore rules.</param>
+    /// <param name=\"maxDepth\">Maximum depth to traverse.</param>
+    /// <param name=\"includeFiles\">Whether to include files in the tree.</param>
     /// <returns>JSON string with the directory tree.</returns>
     [McpServerTool("directory_tree")]
     [Description("Get a recursive tree view of files and directories as a JSON structure.")]
-    public static string DirectoryTree(
+    public static async Task<string> DirectoryTree(
         [Description("Path to the root directory")]
         string path,
         [Description("Whether to respect .gitignore rules")]
-        bool respectGitignore = true) =>
-        JsonSerializer.Serialize(FileService.GetDirectoryTree(path, respectGitignore), DefaultJsonOptions);
+        bool respectGitignore = true,
+        [Description("Maximum depth to traverse. Default is 3.")]
+        int maxDepth = 3,
+        [Description("Whether to include files in the tree. Default is true.")]
+        bool includeFiles = true)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            DirectoryTreeNode treeNode = await fileService.GetDirectoryTreeAsync(path, respectGitignore, maxDepth, includeFiles);
+            return JsonSerializer.Serialize(treeNode, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
     /// Move or rename files and directories.
     /// </summary>
-    /// <param name="source">Source path.</param>
-    /// <param name="destination">Destination path.</param>
+    /// <param name=\"sourcePath\">Source path.</param>
+    /// <param name=\"destinationPath\">Destination path.</param>
     /// <returns>Success or error message.</returns>
-    [McpServerTool("move_file")]
+    [McpServerTool("move_item")]
     [Description("Move or rename files and directories.")]
-    public static string MoveFile(
+    public static async Task<string> MoveItem(
         [Description("Source path")]
-        string source,
+        string sourcePath,
         [Description("Destination path")]
-        string destination) =>
-        FileService.MoveFile(source, destination);
+        string destinationPath)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            await fileService.MovePathAsync(sourcePath, destinationPath);
+            return JsonSerializer.Serialize(new { message = $"Item moved successfully from '{sourcePath}' to '{destinationPath}'." }, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
     /// Copies a file to a new location.
     /// </summary>
-    /// <param name="source">Source file path.</param>
-    /// <param name="destination">Destination file path.</param>
-    /// <param name="overwrite">Whether to overwrite an existing file.</param>
+    /// <param name=\"sourcePath\">Source file path.</param>
+    /// <param name=\"destinationPath\">Destination file path.</param>
+    /// <param name=\"overwrite\">Whether to overwrite an existing file.</param>
     /// <returns>Success or error message.</returns>
     [McpServerTool("copy_file")]
     [Description("Copies a file to a new location.")]
-    public static string CopyFile(
+    public static async Task<string> CopyFile(
         [Description("Source file path")]
-        string source,
+        string sourcePath,
         [Description("Destination file path")]
-        string destination,
+        string destinationPath,
         [Description("Whether to overwrite an existing file (default: false)")]
-        bool overwrite = false) =>
-        FileService.CopyFile(source, destination, overwrite);
+        bool overwrite = false)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            await fileService.CopyFileAsync(sourcePath, destinationPath, overwrite);
+            return JsonSerializer.Serialize(new { message = $"File copied successfully from '{sourcePath}' to '{destinationPath}'." }, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
     /// Copies a directory and its contents to a new location.
     /// </summary>
-    /// <param name="source">Source directory path.</param>
-    /// <param name="destination">Destination directory path.</param>
-    /// <param name="overwrite">Whether to overwrite existing files.</param>
-    /// <param name="recursive">Whether to copy subdirectories.</param>
-    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
+    /// <param name=\"sourcePath\">Source directory path.</param>
+    /// <param name=\"destinationPath\">Destination directory path.</param>
+    /// <param name=\"overwrite\">Whether to overwrite existing files.</param>
+    /// <param name=\"respectGitignore\">Whether to respect .gitignore rules when copying contents.</param>
     /// <returns>Success or error message.</returns>
     [McpServerTool("copy_directory")]
     [Description("Copies a directory and its contents to a new location.")]
-    public static string CopyDirectory(
+    public static async Task<string> CopyDirectory(
         [Description("Source directory path")]
-        string source,
+        string sourcePath,
         [Description("Destination directory path")]
-        string destination,
+        string destinationPath,
         [Description("Whether to overwrite existing files (default: false)")]
         bool overwrite = false,
-        [Description("Whether to copy subdirectories (default: true)")]
-        bool recursive = true,
-        [Description("Whether to respect .gitignore rules (default: true)")]
-        bool respectGitignore = true) =>
-        FileService.CopyDirectory(source, destination, overwrite, recursive, respectGitignore);
+        [Description("Whether to respect .gitignore rules when copying contents (default: true)")]
+        bool respectGitignore = true)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            await fileService.CopyDirectoryAsync(sourcePath, destinationPath, overwrite, respectGitignore);
+            return JsonSerializer.Serialize(new { message = $"Directory copied successfully from '{sourcePath}' to '{destinationPath}'." }, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
-    /// Copies files matching a pattern from source directory to destination directory.
+    /// Deletes a file or an empty directory. For non-empty directories, use delete_directory_recursive.
     /// </summary>
-    /// <param name="sourceDir">Source directory path.</param>
-    /// <param name="destinationDir">Destination directory path.</param>
-    /// <param name="pattern">File pattern to match (e.g., "*.exe", "data.*").</param>
-    /// <param name="recursive">Whether to search subdirectories recursively.</param>
-    /// <param name="overwrite">Whether to overwrite existing files.</param>
-    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
-    /// <returns>Success message with statistics or error message.</returns>
-    [McpServerTool("copy_files_with_pattern")]
-    [Description("Copies files matching a pattern from source directory to destination directory.")]
-    public static string CopyFilesWithPattern(
-        [Description("Source directory path")]
-        string sourceDir,
-        [Description("Destination directory path")]
-        string destinationDir,
-        [Description("File pattern to match (e.g., '*.exe', 'data.*')")]
-        string pattern = "*.*",
-        [Description("Whether to search subdirectories recursively (default: false)")]
-        bool recursive = false,
-        [Description("Whether to overwrite existing files (default: false)")]
-        bool overwrite = false,
-        [Description("Whether to respect .gitignore rules (default: true)")]
-        bool respectGitignore = true) =>
-        FileService.CopyFilesWithPattern(sourceDir, destinationDir, pattern, recursive, overwrite, respectGitignore);
+    /// <param name=\"path\">Path to the file or empty directory to delete.</param>
+    /// <returns>Success or error message.</returns>
+    [McpServerTool("delete_item")]
+    [Description("Deletes a file or an empty directory. For non-empty directories, use delete_directory_recursive.")]
+    public static async Task<string> DeleteItem(
+        [Description("Path to the file or empty directory to delete")]
+        string path)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            await fileService.DeletePathAsync(path, false); // Not recursive by default for this tool
+            return JsonSerializer.Serialize(new { message = $"Item '{path}' deleted successfully." }, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
-    /// Recursively search for files and directories matching a pattern.
+    /// Deletes a directory and all its contents recursively.
     /// </summary>
-    /// <param name="path">Starting path for the search.</param>
-    /// <param name="pattern">Search pattern.</param>
-    /// <param name="excludePatterns">Optional patterns to exclude.</param>
+    /// <param name=\"path\">Path to the directory to delete.</param>
+    /// <returns>Success or error message.</returns>
+    [McpServerTool("delete_directory_recursive")]
+    [Description("Deletes a directory and all its contents recursively.")]
+    public static async Task<string> DeleteDirectoryRecursive(
+        [Description("Path to the directory to delete")]
+        string path)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            await fileService.DeletePathAsync(path, true); // Recursive delete
+            return JsonSerializer.Serialize(new { message = $"Directory '{path}' deleted recursively successfully." }, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
+
+    /// <summary>
+    /// Recursively search for files matching a pattern.
+    /// </summary>
+    /// <param name=\"directory\">Starting path for the search.</param>
+    /// <param name=\"pattern\">Search pattern (e.g., \"*.txt\").</param>
+    /// <param name=\"excludePatternsJson\">Optional JSON string array of patterns to exclude files.</param>
+    /// <param name=\"respectGitignore\">Whether to respect .gitignore rules.</param>
     /// <returns>JSON string with matching file paths.</returns>
-    [McpServerTool("search_files")]
-    [Description("Recursively search for files and directories matching a pattern.")]
-    public static string SearchFiles(
-        [Description("Starting path for the search")]
-        string path,
-        [Description("Search pattern")]
+    [McpServerTool("search_files_by_pattern")]
+    [Description("Recursively search for files matching a pattern.")]
+    public static async Task<string> SearchFilesByPattern(
+        [Description("Starting directory for the search")]
+        string directory,
+        [Description("Search pattern (e.g., \'*.txt\')")]
         string pattern,
-        [Description("Optional patterns to exclude")]
-        string[] excludePatterns = null,
+        [Description("Optional JSON string array of patterns to exclude files (e.g., '[\\\"*.log\\\", \\\"temp_*\\\"]'. Pass null or empty string if no exclusions.)")]
+        string? excludePatternsJson = null,
         [Description("Whether to respect .gitignore rules")]
-        bool respectGitignore = true) =>
-        JsonSerializer.Serialize(SearchService.SearchFiles(path, pattern, excludePatterns, respectGitignore), DefaultJsonOptions);
+        bool respectGitignore = true)
+    {
+        try
+        {
+            string[]? excludePatterns = null;
+            if (!string.IsNullOrEmpty(excludePatternsJson))
+            {
+                try
+                {
+                    excludePatterns = JsonSerializer.Deserialize<string[]>(excludePatternsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                }
+                catch (JsonException jsonEx)
+                {
+                    return JsonSerializer.Serialize(new { error = $"Invalid JSON format for exclude patterns: {jsonEx.Message}" }, DefaultJsonOptions);
+                }
+            }
+
+            // SearchService.SearchFilesAsync returns Task<string[]>
+            string[] files = await SearchService.SearchFilesAsync(directory, pattern, respectGitignore, excludePatterns);
+            return JsonSerializer.Serialize(files, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
     /// Retrieve detailed metadata about a file or directory.
     /// </summary>
-    /// <param name="path">Path to the file or directory.</param>
+    /// <param name=\"path\">Path to the file or directory.</param>
     /// <returns>JSON string with file/directory metadata.</returns>
-    [McpServerTool("get_file_info")]
+    [McpServerTool("get_item_info")]
     [Description("Retrieve detailed metadata about a file or directory.")]
-    public static string GetFileInfo(
+    public static async Task<string> GetItemInfo(
         [Description("Path to the file or directory")]
-        string path) =>
-        JsonSerializer.Serialize(FileService.GetFileInfo(path), DefaultJsonOptions);
+        string path)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            // Corrected: GetPathInfoAsync returns PathInfo. PathInfo is a FileSystemEntry.
+            // No explicit cast needed if PathInfo derives from FileSystemEntry and contains all necessary fields for serialization.
+            // If FileSystemEntry is preferred for the variable type for some reason, and PathInfo is assignable, it's fine.
+            // Let's use PathInfo directly as it's the specific type returned.
+            PathInfo info = await fileService.GetPathInfoAsync(path);
+            return JsonSerializer.Serialize(info, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
-    /// Sets the base directory for all file operations.
+    /// Sets the base directory for all file operations. This directory must exist.
     /// </summary>
-    /// <param name="directory">Absolute path to set as the new base directory.</param>
+    /// <param name=\"directory\">Absolute path to set as the new base directory.</param>
     /// <returns>Success or error message.</returns>
     [McpServerTool("set_base_directory")]
-    [Description("Sets the base directory for all file operations.")]
-    public static string SetBaseDirectory(
+    [Description("Sets the base directory for all file operations. This directory must exist.")]
+    public static string SetBaseDirectory( // This remains synchronous as FileValidationService.SetBaseDirectory is sync
         [Description("Absolute path to set as the new base directory. Must be a valid, existing directory")]
         string directory)
     {
         try
         {
+            // FileValidationService.SetBaseDirectory will throw if the directory doesn't exist or is invalid.
             FileValidationService.SetBaseDirectory(directory);
-            return JsonSerializer.Serialize(new[] { $"Base directory set to: {directory}" }, DefaultJsonOptions);
+            // To ensure FileService instances created after this use the new path, 
+            // GetFileService() will naturally pick it up.
+            return JsonSerializer.Serialize(new { message = $"Base directory set to: {FileValidationService.BaseDirectory}" }, DefaultJsonOptions);
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new[] { $"Error: {ex.Message}" }, DefaultJsonOptions);
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
         }
     }
 
@@ -316,21 +511,21 @@ public static class FileTools
     /// <returns>JSON string with the current base directory.</returns>
     [McpServerTool("get_base_directory")]
     [Description("Returns the current base directory used for all file operations.")]
-    public static string GetBaseDirectory()
+    public static string GetBaseDirectory() // This remains synchronous
     {
         try
         {
             var baseDir = FileValidationService.BaseDirectory;
-            
             return JsonSerializer.Serialize(new
             {
                 BaseDirectory = baseDir,
-                Exists = Directory.Exists(baseDir)
+                Exists = !string.IsNullOrEmpty(baseDir) && System.IO.Directory.Exists(baseDir)
             }, DefaultJsonOptions);
         }
         catch (Exception ex)
         {
-            return JsonSerializer.Serialize(new { Error = ex.Message }, DefaultJsonOptions);
+            // This should ideally not throw if BaseDirectory is just a string property.
+            return JsonSerializer.Serialize(new { Error = $"Failed to retrieve base directory: {ex.Message}" }, DefaultJsonOptions);
         }
     }
 
@@ -339,91 +534,126 @@ public static class FileTools
     /// </summary>
     /// <returns>JSON string with allowed directories.</returns>
     [McpServerTool("list_allowed_directories")]
-    [Description("Returns the list of directories that this server is allowed to access.")]
-    public static string ListAllowedDirectories() =>
-        JsonSerializer.Serialize(FileService.ListAccessibleDirectories(), DefaultJsonOptions);
+    [Description("Returns the list of directories that this server is allowed to access (includes the current BaseDirectory).")]
+    public static string ListAllowedDirectories() // This remains synchronous
+    {
+        try
+        {
+            var allowedDirs = FileValidationService.AllowedBaseDirectories;
+            return JsonSerializer.Serialize(allowedDirs, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
-    /// Scans the current solution and returns all .csproj files found.
+    /// Searches for text in files within a directory.
     /// </summary>
-    /// <returns>JSON string with project file paths.</returns>
+    /// <param name=\"query\">The text or regex pattern to search for.</param>
+    /// <param name=\"searchPath\">Optional relative path within the base directory to search. Defaults to base directory.</param>
+    /// <param name=\"filePattern\">Optional file pattern (e.g., \"*.cs\"). Defaults to all files.</param>
+    /// <param name=\"caseSensitive\">Whether the search is case-sensitive. Default is false.</param>
+    /// <param name=\"useRegex\">Whether the query is a regular expression. Default is false.</param>
+    /// <returns>A JSON string containing search results.</returns>
+    [McpServerTool("search_text_in_files")]
+    [Description("Searches for text in files. Can use regex and specify case sensitivity.")]
+    public static async Task<string> SearchTextInFiles(
+        [Description("The text or regex pattern to search for.")]
+        string query,
+        [Description("Optional relative path within the base directory to search. Defaults to base directory (empty string or null).")]
+        string? searchPath = null,
+        [Description("Optional file pattern (e.g., \\\"*.cs\\\"). Defaults to all files (*.*).")]
+        string? filePattern = null,
+        [Description("Whether the search is case-sensitive. Default is false.")]
+        bool caseSensitive = false,
+        [Description("Whether the query is a regular expression. Default is false.")]
+        bool useRegex = false)
+    {
+        try
+        {
+            // SearchService.SearchAsync returns Task<IEnumerable<SearchResult>>
+            var results = await SearchService.SearchAsync(query, filePattern, caseSensitive, useRegex, searchPath);
+            return JsonSerializer.Serialize(results, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
+
+    // Tools for CodeAnalysisService (static calls, remain synchronous as per CodeAnalysisService current design)
+
+    /// <summary>
+    /// Lists all .csproj files in the current base directory and its subdirectories.
+    /// </summary>
     [McpServerTool("list_projects")]
-    [Description("Scans the current solution and returns all .csproj files found.")]
-    public static string ListProjects() => 
-        JsonSerializer.Serialize(CodeAnalysisService.ListProjects(), DefaultJsonOptions);
+    [Description("Lists all .csproj files in the current base directory and its subdirectories.")]
+    public static string ListProjects() // Sync
+    {
+        try
+        {
+            // CodeAnalysisService.ListProjects() uses FileValidationService.BaseDirectory internally
+            var projects = CodeAnalysisService.ListProjects();
+            return JsonSerializer.Serialize(projects, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
-    /// Searches a specific directory for .csproj files.
+    /// Lists all .csproj files in the specified directory (must be within allowed paths).
     /// </summary>
-    /// <param name="directory">Directory to search in.</param>
-    /// <returns>JSON string with project file paths.</returns>
-    [McpServerTool("list_projects_in_dir")]
-    [Description("Searches a specific directory for .csproj files.")]
+    [McpServerTool("list_projects_in_directory")]
+    [Description("Lists all .csproj files in the specified directory (must be within allowed paths).")]
     public static string ListProjectsInDirectory(
-        [Description("Absolute path to the directory to search for .csproj files")]
-        string directory) => 
-        JsonSerializer.Serialize(CodeAnalysisService.ListProjectsInDirectory(directory), DefaultJsonOptions);
+        [Description("The directory to search in (e.g., 'src/MyProject'). Path is relative to base or an allowed absolute path.")] string directory) // Sync
+    {
+        try
+        {
+            var projects = CodeAnalysisService.ListProjectsInDirectory(directory);
+            return JsonSerializer.Serialize(projects, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
-    /// Returns all .sln files found in the base directory.
+    /// Lists all .sln files in the current base directory and its subdirectories.
     /// </summary>
-    /// <returns>JSON string with solution file paths.</returns>
     [McpServerTool("list_solutions")]
-    [Description("Returns all .sln files found in the base directory.")]
-    public static string ListSolutions() => 
-        JsonSerializer.Serialize(CodeAnalysisService.ListSolutions(), DefaultJsonOptions);
+    [Description("Lists all .sln files in the current base directory and its subdirectories.")]
+    public static string ListSolutions() // Sync
+    {
+        try
+        {
+            // CodeAnalysisService.ListSolutions() uses FileValidationService.BaseDirectory internally
+            var solutions = CodeAnalysisService.ListSolutions();
+            return JsonSerializer.Serialize(solutions, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
 
     /// <summary>
-    /// Lists all source files in a project directory.
+    /// Lists all source files in a project directory (must be within allowed paths).
     /// </summary>
-    /// <param name="projectDir">Project directory to scan.</param>
-    /// <returns>JSON string with source file paths.</returns>
     [McpServerTool("list_source_files")]
-    [Description("Lists all source files in a project directory.")]
+    [Description("Lists all source files in a project directory (must be within allowed paths).")]
     public static string ListSourceFiles(
-        [Description("Absolute path to the project directory to scan for source files")]
-        string projectDir) => 
-        JsonSerializer.Serialize(CodeAnalysisService.ListSourceFiles(projectDir), DefaultJsonOptions);
-
-    /// <summary>
-    /// Performs a text-based search across all code files for the specified text.
-    /// </summary>
-    /// <param name="searchText">The text to search for.</param>
-    /// <param name="directory">The directory to search in (defaults to base directory).</param>
-    /// <param name="filePattern">Optional file pattern to filter by (e.g., "*.cs").</param>
-    /// <param name="recursive">Whether to search subdirectories.</param>
-    /// <returns>JSON string with search results.</returns>
-    [McpServerTool("search_code")]
-    [Description("Performs a text-based search across all code files for the specified text.")]
-    public static string SearchCode(
-        [Description("The exact text string to search for in the codebase")]
-        string searchText,
-        [Description("Directory to search in (defaults to base directory)")]
-        string directory = ".",
-        [Description("File pattern to filter by (e.g., '*.cs', defaults to '*.*')")]
-        string filePattern = "*.*",
-        [Description("Whether to search subdirectories (default: true)")]
-        bool recursive = true,
-        [Description("Whether to respect .gitignore rules (default: true)")]
-        bool respectGitignore = true)
+        [Description("The project directory to search in (e.g., 'src/MyProject'). Path is relative to base or an allowed absolute path.")] string projectDir) // Sync
     {
         try
         {
-            var results = SearchService.SearchTextInFiles(directory, searchText, filePattern, recursive, respectGitignore);
-            
-            // Check if there's an error
-            if (results.ContainsKey("error"))
-            {
-                return JsonSerializer.Serialize(new { error = results["error"][0].Text }, DefaultJsonOptions);
-            }
-            
-            // No files found with matches
-            if (results.Count == 0)
-            {
-                return JsonSerializer.Serialize(new { message = $"No matches found for '{searchText}'" }, DefaultJsonOptions);
-            }
-
-            return JsonSerializer.Serialize(results, DefaultJsonOptions);
+            var files = CodeAnalysisService.ListSourceFiles(projectDir);
+            return JsonSerializer.Serialize(files, DefaultJsonOptions);
         }
         catch (Exception ex)
         {
@@ -432,68 +662,12 @@ public static class FileTools
     }
 
     /// <summary>
-    /// Searches and replaces text in multiple files.
+    /// Extracts an outline of classes, methods, and properties from a C# code file using Roslyn.
     /// </summary>
-    /// <param name="searchText">The text to search for.</param>
-    /// <param name="replaceText">The text to replace with.</param>
-    /// <param name="directory">The directory containing the files.</param>
-    /// <param name="filePattern">Optional file pattern to filter by.</param>
-    /// <param name="recursive">Whether to search subdirectories.</param>
-    /// <param name="dryRun">Whether to perform a dry run without making changes.</param>
-    /// <returns>JSON string with results for each file.</returns>
-    [McpServerTool("search_and_replace")]
-    [Description("Searches and replaces text in multiple files.")]
-    public static string SearchAndReplace(
-        [Description("The exact text string to search for")]
-        string searchText,
-        [Description("The text to replace with")]
-        string replaceText,
-        [Description("Directory to search in (defaults to base directory)")]
-        string directory = ".",
-        [Description("File pattern to filter by (e.g., '*.cs', defaults to '*.*')")]
-        string filePattern = "*.*",
-        [Description("Whether to search subdirectories (default: true)")]
-        bool recursive = true,
-        [Description("Perform a dry run without making changes (default: false)")]
-        bool dryRun = false,
-        [Description("Whether to respect .gitignore rules (default: true)")]
-        bool respectGitignore = true)
-    {
-        try
-        {
-            var results = SearchService.SearchAndReplaceInFiles(directory, searchText, replaceText, filePattern, recursive, dryRun, respectGitignore);
-            
-            // Check if there's an error
-            if (results.ContainsKey("error"))
-            {
-                return JsonSerializer.Serialize(new { error = results["error"] }, DefaultJsonOptions);
-            }
-            
-            // No files found with matches
-            if (results.Count == 0)
-            {
-                return JsonSerializer.Serialize(new { message = $"No matches found for '{searchText}'" }, DefaultJsonOptions);
-            }
-
-            return JsonSerializer.Serialize(results, DefaultJsonOptions);
-        }
-        catch (Exception ex)
-        {
-            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
-        }
-    }
-
-    /// <summary>
-    /// Extracts an outline of classes, methods, and properties from C# code files
-    /// without including implementation details.
-    /// </summary>
-    /// <param name="filePath">Path to the C# file to analyze.</param>
-    /// <returns>JSON string with the code outline.</returns>
-    [McpServerTool("code_outline")]
-    [Description("Extracts an outline of classes, methods, and properties from C# code files without implementation details.")]
+    [McpServerTool("get_code_outline")]
+    [Description("Extracts an outline of classes, methods, and properties from a C# code file using Roslyn.")]
     public static string GetCodeOutline(
-        [Description("Path to the C# file to analyze")]
-        string filePath)
+        [Description("Path to the C# file to analyze (e.g., 'src/MyClass.cs'). Path is relative to base or an allowed absolute path.")] string filePath) // Sync
     {
         try
         {
@@ -507,21 +681,14 @@ public static class FileTools
     }
 
     /// <summary>
-    /// Generates code outlines for all C# files in a directory.
+    /// Generate code outline for all C# files in a directory using Roslyn.
     /// </summary>
-    /// <param name="directoryPath">Path to the directory to analyze.</param>
-    /// <param name="filePattern">File pattern to filter (default: *.cs).</param>
-    /// <param name="recursive">Whether to search subdirectories.</param>
-    /// <returns>JSON string with code outlines for all files.</returns>
-    [McpServerTool("code_outline_directory")]
-    [Description("Generates code outlines for all C# files in a directory.")]
-    public static string GetCodeOutlineDirectory(
-        [Description("Path to the directory to analyze")]
-        string directoryPath, 
-        [Description("File pattern to filter (default: *.cs)")]
-        string filePattern = "*.cs",
-        [Description("Whether to search subdirectories (default: true)")]
-        bool recursive = true)
+    [McpServerTool("get_code_outlines_for_directory")]
+    [Description("Generate code outline for all C# files in a directory using Roslyn.")]
+    public static string GetCodeOutlinesForDirectory(
+        [Description("Path to the directory to analyze (e.g., 'src/Services'). Path is relative to base or an allowed absolute path.")] string directoryPath,
+        [Description("File pattern to filter (default: *.cs).")] string filePattern = "*.cs",
+        [Description("Whether to search subdirectories.")] bool recursive = true) // Sync
     {
         try
         {
@@ -532,27 +699,5 @@ public static class FileTools
         {
             return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
         }
-    }
-
-    /// <summary>
-    /// Formats a file size in bytes to a human-readable string.
-    /// </summary>
-    /// <param name="sizeInBytes">Size in bytes.</param>
-    /// <returns>Formatted file size (e.g., "1.5 MB", "500 KB").</returns>
-    public static string GetFileSize(long sizeInBytes)
-    {
-        const long KB = 1024;
-        const long MB = KB * 1024;
-        const long GB = MB * 1024;
-        const long TB = GB * 1024;
-
-        return sizeInBytes switch
-        {
-            < KB => $"{sizeInBytes} B",
-            < MB => $"{Math.Round((double)sizeInBytes / KB, 1)} KB",
-            < GB => $"{Math.Round((double)sizeInBytes / MB, 1)} MB",
-            < TB => $"{Math.Round((double)sizeInBytes / GB, 1)} GB",
-            _ => $"{Math.Round((double)sizeInBytes / TB, 1)} TB"
-        };
     }
 }

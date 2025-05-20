@@ -1,848 +1,606 @@
-using MCPFileSystemServer.Tools;
+using MCPFileSystem.Contracts;
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 
-namespace MCPFileSystemServer.Services;
-
-/// <summary>
-/// Provides file system operations for the MCP server.
-/// </summary>
-public static class FileService
+namespace MCPFileSystemServer.Services
 {
-    /// <summary>
-    /// Lists all files in the specified directory.
-    /// </summary>
-    /// <param name="directoryPath">The directory to list files from.</param>
-    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
-    /// <returns>An array of file paths or an error message.</returns>
-    public static string[] ListFiles(string directoryPath, bool respectGitignore = true)
+    public class FileService
     {
-        try
+        private readonly string _basePath;
+
+        public FileService(string basePath)
         {
-            var normalizedPath = FileValidationService.NormalizePath(directoryPath);
-
-            if (!Directory.Exists(normalizedPath))
-            {
-                return new[] { $"Error: Directory not found: {directoryPath}" };
-            }
-
-            // Get directory info first
-            var dirInfo = new DirectoryInfo(normalizedPath);
-            List<string> result = new List<string>
-            {
-                $"Directory: {dirInfo.FullName}",
-                $"Created: {dirInfo.CreationTime}",
-                $"Last Modified: {dirInfo.LastWriteTime}"
-            };
-
-            // Get files
-            var files = Directory.GetFiles(normalizedPath);
-            
-            // Apply gitignore filtering if requested
-            if (respectGitignore)
-            {
-                var gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
-                files = files.Where(file => !GitignoreService.IsPathIgnored(file, false, gitignoreRules)).ToArray();
-            }
-
-            // Add file count
-            result.Add($"File count: {files.Length}");
-            
-            // Add files to the result
-            result.AddRange(files);
-            
-            return result.ToArray();
-        }
-        catch (Exception ex)
-        {
-            return new[] { $"Error: {ex.Message}" };
-        }
-    }
-
-    /// <summary>
-    /// Lists all directories in the specified directory.
-    /// </summary>
-    /// <param name="directoryPath">The directory to list directories from.</param>
-    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
-    /// <returns>An array of directory paths or an error message.</returns>
-    public static string[] ListDirectories(string directoryPath, bool respectGitignore = true)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(directoryPath);
-
-            if (!Directory.Exists(normalizedPath))
-            {
-                return new[] { $"Error: Directory not found: {directoryPath}" };
-            }
-
-            // Get directory info first
-            var dirInfo = new DirectoryInfo(normalizedPath);
-            List<string> result = new List<string>
-            {
-                $"Parent Directory: {dirInfo.FullName}",
-                $"Created: {dirInfo.CreationTime}",
-                $"Last Modified: {dirInfo.LastWriteTime}"
-            };
-
-            // Get subdirectories
-            var directories = Directory.GetDirectories(normalizedPath);
-            
-            // Apply gitignore filtering if requested
-            if (respectGitignore)
-            {
-                var gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
-                directories = directories.Where(dir => !GitignoreService.IsPathIgnored(dir, true, gitignoreRules)).ToArray();
-            }
-            
-            // Add directory count
-            result.Add($"Subdirectory count: {directories.Length}");
-            
-            // Add directories to the result
-            result.AddRange(directories);
-            
-            return result.ToArray();
-        }
-        catch (Exception ex)
-        {
-            return new[] { $"Error: {ex.Message}" };
-        }
-    }
-
-    /// <summary>
-    /// Lists all files and directories in the specified directory.
-    /// </summary>
-    /// <param name="directoryPath">The directory to list contents from.</param>
-    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
-    /// <returns>An array of content information or an error message.</returns>
-    public static string[] ListDirectoryContents(string directoryPath, bool respectGitignore = true)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(directoryPath);
-
-            if (!Directory.Exists(normalizedPath))
-            {
-                return new[] { $"Error: Directory not found: {directoryPath}" };
-            }
-
-            // Get directory info first
-            var dirInfo = new DirectoryInfo(normalizedPath);
-            List<string> result = new List<string>
-            {
-                $"Directory: {dirInfo.FullName}",
-                $"Created: {dirInfo.CreationTime}",
-                $"Last Modified: {dirInfo.LastWriteTime}"
-            };
-
-            // Load gitignore rules if needed
-            List<GitignoreRule> gitignoreRules = null;
-            if (respectGitignore)
-            {
-                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedPath);
-            }
-
-            // Get subdirectories
-            var directories = Directory.GetDirectories(normalizedPath);
-            
-            // Apply gitignore filtering if requested
-            if (respectGitignore)
-            {
-                directories = directories.Where(dir => 
-                    !GitignoreService.IsPathIgnored(dir, true, gitignoreRules)).ToArray();
-            }
-            
-            // Get files
-            var files = Directory.GetFiles(normalizedPath);
-            
-            // Apply gitignore filtering if requested
-            if (respectGitignore)
-            {
-                files = files.Where(file => 
-                    !GitignoreService.IsPathIgnored(file, false, gitignoreRules)).ToArray();
-            }
-
-            // Add counts
-            result.Add($"Subdirectory count: {directories.Length}");
-            result.Add($"File count: {files.Length}");
-            result.Add("---");
-            
-            // Add directories with folder indicator
-            result.Add("FOLDERS:");
-            if (directories.Length > 0)
-            {
-                foreach (var dir in directories)
-                {
-                    result.Add($"📁 {Path.GetFileName(dir)}");
-                }
-            }
-            else
-            {
-                result.Add("(No folders)");
-            }
-            
-            result.Add("---");
-            
-            // Add files
-            result.Add("FILES:");
-            if (files.Length > 0)
-            {
-                foreach (var file in files)
-                {
-                    var fileInfo = new FileInfo(file);
-                    result.Add($"📄 {Path.GetFileName(file)} ({FileTools.GetFileSize(fileInfo.Length)})");
-                }
-            }
-            else
-            {
-                result.Add("(No files)");
-            }
-            
-            return result.ToArray();
-        }
-        catch (Exception ex)
-        {
-            return new[] { $"Error: {ex.Message}" };
-        }
-    }
-
-    /// <summary>
-    /// Reads a file and returns its contents.
-    /// </summary>
-    /// <param name="filePath">The path of the file to read.</param>
-    /// <returns>The file contents as a string.</returns>
-    public static string OpenFile(string filePath)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(filePath);
-
-            if (!File.Exists(normalizedPath))
-            {
-                return $"Error: File not found: {filePath}";
-            }
-
-            return File.ReadAllText(normalizedPath);
-        }
-        catch (Exception ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    /// <summary>
-    /// Writes content to a file.
-    /// </summary>
-    /// <param name="filePath">The path of the file to write.</param>
-    /// <param name="content">The content to write.</param>
-    /// <returns>Success message or error message.</returns>
-    public static string WriteFile(string filePath, string content)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(filePath);
-
-            // Ensure the directory exists
-            var directory = Path.GetDirectoryName(normalizedPath);
-            if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
-            {
-                Directory.CreateDirectory(directory);
-            }
-
-            File.WriteAllText(normalizedPath, content);
-            return $"Successfully wrote to {filePath}";
-        }
-        catch (Exception ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    /// <summary>
-    /// Creates a directory.
-    /// </summary>
-    /// <param name="path">The path of the directory to create.</param>
-    /// <returns>Success message or error message.</returns>
-    public static string CreateDirectory(string path)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(path);
-
-            if (Directory.Exists(normalizedPath))
-            {
-                return $"Directory already exists: {path}";
-            }
-
-            Directory.CreateDirectory(normalizedPath);
-            return $"Successfully created directory {path}";
-        }
-        catch (Exception ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    /// <summary>
-    /// Moves a file or directory to a new location.
-    /// </summary>
-    /// <param name="source">The source path.</param>
-    /// <param name="destination">The destination path.</param>
-    /// <returns>Success message or error message.</returns>
-    public static string MoveFile(string source, string destination)
-    {
-        try
-        {
-            var normalizedSource = FileValidationService.NormalizePath(source);
-            var normalizedDestination = FileValidationService.NormalizePath(destination);
-
-            // Check if source exists
-            if (!File.Exists(normalizedSource) && !Directory.Exists(normalizedSource))
-            {
-                return $"Error: Source path not found: {source}";
-            }
-
-            // Check if destination already exists
-            if (File.Exists(normalizedDestination) || Directory.Exists(normalizedDestination))
-            {
-                return $"Error: Destination path already exists: {destination}";
-            }
-
-            // Ensure destination directory exists
-            var destDir = Path.GetDirectoryName(normalizedDestination);
-            if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
-            {
-                Directory.CreateDirectory(destDir);
-            }
-
-            // Move file or directory
-            if (File.Exists(normalizedSource))
-            {
-                File.Move(normalizedSource, normalizedDestination);
-                return $"Successfully moved file from {source} to {destination}";
-            }
-            else
-            {
-                Directory.Move(normalizedSource, normalizedDestination);
-                return $"Successfully moved directory from {source} to {destination}";
-            }
-        }
-        catch (Exception ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    /// <summary>
-    /// Copies a file to a new location.
-    /// </summary>
-    /// <param name="source">The source file path.</param>
-    /// <param name="destination">The destination file path.</param>
-    /// <param name="overwrite">Whether to overwrite existing files.</param>
-    /// <returns>Success message or error message.</returns>
-    public static string CopyFile(string source, string destination, bool overwrite = false)
-    {
-        try
-        {
-            var normalizedSource = FileValidationService.NormalizePath(source);
-            var normalizedDestination = FileValidationService.NormalizePath(destination);
-
-            // Check if source exists and is a file
-            if (!File.Exists(normalizedSource))
-            {
-                return $"Error: Source file not found: {source}";
-            }
-
-            // Check if destination already exists and overwrite is false
-            if (File.Exists(normalizedDestination) && !overwrite)
-            {
-                return $"Error: Destination file already exists: {destination}. Use overwrite=true to replace it.";
-            }
-
-            // Ensure destination directory exists
-            var destDir = Path.GetDirectoryName(normalizedDestination);
-            if (!string.IsNullOrEmpty(destDir) && !Directory.Exists(destDir))
-            {
-                Directory.CreateDirectory(destDir);
-            }
-
-            File.Copy(normalizedSource, normalizedDestination, overwrite);
-            return $"Successfully copied file from {source} to {destination}";
-        }
-        catch (Exception ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    /// <summary>
-    /// Copies a directory and its contents to a new location.
-    /// </summary>
-    /// <param name="source">The source directory path.</param>
-    /// <param name="destination">The destination directory path.</param>
-    /// <param name="overwrite">Whether to overwrite existing files.</param>
-    /// <param name="recursive">Whether to copy subdirectories.</param>
-    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
-    /// <returns>Success message or error message.</returns>
-    public static string CopyDirectory(string source, string destination, bool overwrite = false, bool recursive = true, bool respectGitignore = true)
-    {
-        try
-        {
-            var normalizedSource = FileValidationService.NormalizePath(source);
-            var normalizedDestination = FileValidationService.NormalizePath(destination);
-
-            // Check if source exists and is a directory
-            if (!Directory.Exists(normalizedSource))
-            {
-                return $"Error: Source directory not found: {source}";
-            }
-
-            // Create destination directory if it doesn't exist
-            if (!Directory.Exists(normalizedDestination))
-            {
-                Directory.CreateDirectory(normalizedDestination);
-            }
-
-            // Load gitignore rules if needed
-            List<GitignoreRule> gitignoreRules = null;
-            if (respectGitignore)
-            {
-                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedSource);
-            }
-
-            // Get files in source directory
-            var files = Directory.GetFiles(normalizedSource);
-            int copiedFiles = 0;
-            int copiedDirs = 0;
-
-            // Copy each file
-            foreach (var file in files)
-            {
-                var fileName = Path.GetFileName(file);
-                var destFile = Path.Combine(normalizedDestination, fileName);
-
-                // Skip if file is ignored by gitignore
-                if (respectGitignore && GitignoreService.IsPathIgnored(file, false, gitignoreRules))
-                {
-                    continue;
-                }
-
-                File.Copy(file, destFile, overwrite);
-                copiedFiles++;
-            }
-
-            // Copy subdirectories if recursive is true
-            if (recursive)
-            {
-                var dirs = Directory.GetDirectories(normalizedSource);
-                foreach (var dir in dirs)
-                {
-                    var dirName = Path.GetFileName(dir);
-                    var destDir = Path.Combine(normalizedDestination, dirName);
-
-                    // Skip if directory is ignored by gitignore
-                    if (respectGitignore && GitignoreService.IsPathIgnored(dir, true, gitignoreRules))
-                    {
-                        continue;
-                    }
-
-                    var result = CopyDirectory(dir, destDir, overwrite, recursive, respectGitignore);
-                    
-                    // If successful, increment count (extract the count from result)
-                    if (!result.StartsWith("Error:"))
-                    {
-                        copiedDirs++;
-                    }
-                }
-            }
-
-            return $"Successfully copied directory from {source} to {destination}. Copied {copiedFiles} files and {copiedDirs} directories.";
-        }
-        catch (Exception ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    /// <summary>
-    /// Copies files matching a pattern from source to destination directory.
-    /// </summary>
-    /// <param name="sourceDir">The source directory to copy files from.</param>
-    /// <param name="destinationDir">The destination directory to copy files to.</param>
-    /// <param name="pattern">File pattern to match (e.g., "*.exe", "data.*").</param>
-    /// <param name="recursive">Whether to search subdirectories recursively.</param>
-    /// <param name="overwrite">Whether to overwrite existing files.</param>
-    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
-    /// <returns>Result message with statistics about the copied files.</returns>
-    public static string CopyFilesWithPattern(
-        string sourceDir, 
-        string destinationDir, 
-        string pattern = "*.*", 
-        bool recursive = false,
-        bool overwrite = false,
-        bool respectGitignore = true)
-    {
-        try
-        {
-            var normalizedSourceDir = FileValidationService.NormalizePath(sourceDir);
-            var normalizedDestDir = FileValidationService.NormalizePath(destinationDir);
-
-            // Check if source directory exists
-            if (!Directory.Exists(normalizedSourceDir))
-            {
-                return $"Error: Source directory not found: {sourceDir}";
-            }
-
-            // Create destination directory if it doesn't exist
-            if (!Directory.Exists(normalizedDestDir))
-            {
-                Directory.CreateDirectory(normalizedDestDir);
-            }
-
-            // Load gitignore rules if needed
-            List<GitignoreRule> gitignoreRules = null;
-            if (respectGitignore)
-            {
-                gitignoreRules = GitignoreService.LoadGitignoreRules(normalizedSourceDir);
-            }
-
-            // Find all matching files
-            var files = Directory.GetFiles(normalizedSourceDir, pattern,
-                recursive ? SearchOption.AllDirectories : SearchOption.TopDirectoryOnly);
-            
-            // Apply gitignore filtering if requested
-            if (respectGitignore && gitignoreRules != null)
-            {
-                files = files.Where(file => !GitignoreService.IsPathIgnored(file, false, gitignoreRules)).ToArray();
-            }
-
-            if (files.Length == 0)
-            {
-                return $"No files matching pattern '{pattern}' found in {sourceDir}";
-            }
-
-            // Copy each matching file
-            int successCount = 0;
-            int failCount = 0;
-            var results = new StringBuilder();
-            
-            foreach (var file in files)
+            _basePath = Path.GetFullPath(basePath);
+            // Ensure the base directory exists, creating it if necessary.
+            // This is important because FileValidationService.SetBaseDirectory expects an existing directory.
+            if (!Directory.Exists(_basePath))
             {
                 try
                 {
-                    // Calculate relative path to maintain directory structure if copying recursively
-                    string relativePath = Path.GetRelativePath(normalizedSourceDir, file);
-                    string destinationFile = Path.Combine(normalizedDestDir, relativePath);
-                    
-                    // Ensure destination directory exists for the file
-                    string destinationFileDir = Path.GetDirectoryName(destinationFile);
-                    if (!Directory.Exists(destinationFileDir))
-                    {
-                        Directory.CreateDirectory(destinationFileDir);
-                    }
-
-                    // Skip if file already exists and overwrite is false
-                    if (File.Exists(destinationFile) && !overwrite)
-                    {
-                        results.AppendLine($"Skipped (already exists): {relativePath}");
-                        continue;
-                    }
-
-                    // Copy the file
-                    File.Copy(file, destinationFile, overwrite);
-                    successCount++;
-                    results.AppendLine($"Copied: {relativePath}");
+                    Directory.CreateDirectory(_basePath);
                 }
                 catch (Exception ex)
                 {
-                    failCount++;
-                    results.AppendLine($"Failed to copy {Path.GetFileName(file)}: {ex.Message}");
+                    // Consider logging this exception or handling it more gracefully.
+                    // For now, rethrow if critical for server startup.
+                    throw new InvalidOperationException($"Failed to create base directory '{_basePath}'.", ex);
                 }
             }
-
-            // Build summary
-            var summary = new StringBuilder();
-            summary.AppendLine($"Copied {successCount} files from {sourceDir} to {destinationDir}");
-            if (failCount > 0)
-            {
-                summary.AppendLine($"Failed to copy {failCount} files");
-            }
-            summary.AppendLine(results.ToString());
-            
-            return summary.ToString();
+            FileValidationService.SetBaseDirectory(_basePath); 
         }
-        catch (Exception ex)
+
+        private string GetValidatedFullPath(string relativeOrAbsolutePath) // Renamed parameter for clarity
         {
-            return $"Error: {ex.Message}";
+            // NormalizePath will handle making it absolute if it's relative to BaseDirectory,
+            // or validate it if it's already absolute.
+            return FileValidationService.NormalizePath(relativeOrAbsolutePath);
         }
-    }
 
-    /// <summary>
-    /// Edits a file by replacing specified text.
-    /// </summary>
-    /// <param name="filePath">The path of the file to edit.</param>
-    /// <param name="oldText">The text to replace.</param>
-    /// <param name="newText">The new text to replace with.</param>
-    /// <param name="dryRun">Whether to perform a dry run without making changes.</param>
-    /// <returns>Success message, diff result, or error message.</returns>
-    public static string EditFile(string filePath, string oldText, string newText, bool dryRun = false)
-    {
-        try
+        public async Task<PathInfo> GetPathInfoAsync(string path) // Made async
         {
-            var normalizedPath = FileValidationService.NormalizePath(filePath);
-
-            if (!File.Exists(normalizedPath))
+            return await Task.Run(() => 
             {
-                return $"Error: File not found: {filePath}";
-            }
+                string fullPath = GetValidatedFullPath(path);
+                bool exists = File.Exists(fullPath) || Directory.Exists(fullPath);
+                bool isDirectory = exists && Directory.Exists(fullPath);
+                bool isFile = exists && File.Exists(fullPath);
 
-            // Read the original content
-            var originalContent = File.ReadAllText(normalizedPath);
-            string newContent;
-
-            // Only support replacement mode
-            if (string.IsNullOrEmpty(oldText))
-            {
-                return $"Error: Old text cannot be null or empty in replacement mode.";
-            }
-
-            if (!originalContent.Contains(oldText))
-            {
-                return $"Error: Old text not found in file: {filePath}";
-            }
-
-            newContent = originalContent.Replace(oldText, newText);
-
-            if (dryRun)
-            {
-                // Generate a simple diff
-                var diff = SearchService.GenerateDiff(originalContent, newContent);
-                return $"Dry run diff:\n{diff}";
-            }
-
-            File.WriteAllText(normalizedPath, newContent);
-            return $"Successfully replaced text in file {filePath}";
-        }
-        catch (Exception ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    /// <summary>
-    /// Inserts text into a file at a specific line or at the end.
-    /// </summary>
-    /// <param name="filePath">The path of the file to insert into.</param>
-    /// <param name="newText">The new text to insert.</param>
-    /// <param name="insertMode">"end" to append, or a line number to insert at.</param>
-    /// <param name="dryRun">Whether to perform a dry run without making changes.</param>
-    /// <returns>Success message, diff result, or error message.</returns>
-    public static string InsertIntoFile(string filePath, string newText, object? insertMode = null, bool dryRun = false)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(filePath);
-
-            if (!File.Exists(normalizedPath))
-            {
-                return $"Error: File not found: {filePath}";
-            }
-
-            // Read the original content
-            var originalContent = File.ReadAllText(normalizedPath);
-            string newContent;
-
-            if (insertMode is string strInsertMode && strInsertMode.Equals("end", StringComparison.OrdinalIgnoreCase))
-            {
-                // Append to end mode
-                newContent = originalContent;
-                if (!string.IsNullOrEmpty(originalContent) &&
-                    !originalContent.EndsWith("\n") &&
-                    !originalContent.EndsWith("\r"))
+                return new PathInfo
                 {
-                    newContent += Environment.NewLine;
-                }
-                newContent += newText;
-            }
-            else if (insertMode is int lineNum || (insertMode is string strLineNum && int.TryParse(strLineNum, out lineNum)))
+                    Path = path, 
+                    Exists = exists,
+                    IsDirectory = isDirectory,
+                    IsFile = isFile,
+                    Type = isDirectory ? "directory" : (isFile ? "file" : "unknown"),
+                    IsReadOnly = isFile && new System.IO.FileInfo(fullPath).IsReadOnly,
+                };
+            });
+        }
+
+        public async Task<FileInfoContract> GetFileInfoAsync(string path) // Made async
+        {
+            return await Task.Run(() =>
             {
-                // Line number mode
-                var lines = File.ReadAllLines(normalizedPath).ToList();
-                if (lineNum < 0 || lineNum > lines.Count)
+                try
                 {
-                    return $"Error: Line number {lineNum} is out of range. File has {lines.Count} lines.";
+                    string fullPath = GetValidatedFullPath(path);
+                    if (!File.Exists(fullPath))
+                    {
+                        return new FileInfoContract { Name = Path.GetFileName(path), FullName = path, Exists = false, ErrorMessage = "File not found." };
+                    }
+
+                    var fileInfo = new System.IO.FileInfo(fullPath);
+                    return new FileInfoContract
+                    {
+                        Name = fileInfo.Name,
+                        FullName = path,
+                        Length = fileInfo.Length,
+                        CreationTime = fileInfo.CreationTimeUtc,
+                        LastAccessTime = fileInfo.LastAccessTimeUtc,
+                        LastWriteTime = fileInfo.LastWriteTimeUtc,
+                        IsReadOnly = fileInfo.IsReadOnly,
+                        Exists = true,
+                        Extension = fileInfo.Extension,
+                        DirectoryName = Path.GetDirectoryName(path) // Relative directory name
+                    };
                 }
-                lines.Insert(lineNum, newText);
-                newContent = string.Join(Environment.NewLine, lines);
-            }
-            else
+                catch (Exception ex)
+                {
+                    return new FileInfoContract { Name = Path.GetFileName(path), FullName = path, Exists = false, ErrorMessage = ex.Message };
+                }
+            });
+        }
+
+        public async Task<DirectoryInfoContract> GetDirectoryInfoAsync(string path) // Made async
+        {
+            return await Task.Run(() =>
             {
-                return $"Error: Invalid insertMode: {insertMode}. Use \"end\" to append, or a line number.";
-            }
+                try
+                {
+                    string fullPath = GetValidatedFullPath(path);
+                    if (!Directory.Exists(fullPath))
+                    {
+                        return new DirectoryInfoContract { Name = Path.GetFileName(path), FullName = path, Exists = false, ErrorMessage = "Directory not found." };
+                    }
 
-            if (dryRun)
-            {
-                var diff = SearchService.GenerateDiff(originalContent, newContent);
-                return $"Dry run diff:\n{diff}";
-            }
-
-            File.WriteAllText(normalizedPath, newContent);
-
-            string modeDescription = insertMode is string && ((string)insertMode).Equals("end") ? "appended to" : $"inserted at line {insertMode} in";
-            return $"Successfully {modeDescription} file {filePath}";
-        }
-        catch (Exception ex)
-        {
-            return $"Error: {ex.Message}";
-        }
-    }
-
-    /// <summary>
-    /// Gets a recursive directory tree as a JSON-serializable object.
-    /// </summary>
-    /// <param name="path">The root directory path.</param>
-    /// <param name="respectGitignore">Whether to respect .gitignore rules.</param>
-    /// <param name="showHidden">Whether to include hidden files and directories.</param>
-    /// <param name="includeGitFolders">Whether to include .git folders.</param>
-    /// <returns>A nested structure representing the directory tree.</returns>
-    public static object GetDirectoryTree(string path, bool respectGitignore = true, bool showHidden = false, bool includeGitFolders = false)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(path);
-
-            if (!Directory.Exists(normalizedPath))
-            {
-                return new { error = $"Directory not found: {path}" };
-            }
-
-            return BuildDirectoryTree(new System.IO.DirectoryInfo(normalizedPath), respectGitignore, showHidden, includeGitFolders);
-        }
-        catch (Exception ex)
-        {
-            return new { error = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Gets metadata about a file or directory.
-    /// </summary>
-    /// <param name="path">The path to get info for.</param>
-    /// <returns>A dictionary with file or directory information.</returns>
-    public static Dictionary<string, object> GetFileInfo(string path)
-    {
-        try
-        {
-            var normalizedPath = FileValidationService.NormalizePath(path);
-            var result = new Dictionary<string, object>();
-
-            if (File.Exists(normalizedPath))
-            {
-                var fileInfo = new System.IO.FileInfo(normalizedPath);
-                result["type"] = "file";
-                result["name"] = fileInfo.Name;
-                result["path"] = normalizedPath;
-                result["size"] = fileInfo.Length;
-                result["created"] = fileInfo.CreationTime;
-                result["modified"] = fileInfo.LastWriteTime;
-                result["attributes"] = fileInfo.Attributes.ToString();
-                result["extension"] = fileInfo.Extension;
-            }
-            else if (Directory.Exists(normalizedPath))
-            {
-                var dirInfo = new System.IO.DirectoryInfo(normalizedPath);
-                result["type"] = "directory";
-                result["name"] = dirInfo.Name;
-                result["path"] = normalizedPath;
-                result["created"] = dirInfo.CreationTime;
-                result["modified"] = dirInfo.LastWriteTime;
-                result["attributes"] = dirInfo.Attributes.ToString();
-                result["fileCount"] = Directory.GetFiles(normalizedPath).Length;
-                result["directoryCount"] = Directory.GetDirectories(normalizedPath).Length;
-            }
-            else
-            {
-                result["error"] = $"Path not found: {path}";
-            }
-
-            return result;
-        }
-        catch (Exception ex)
-        {
-            return new Dictionary<string, object> { ["error"] = ex.Message };
-        }
-    }
-
-    /// <summary>
-    /// Lists all accessible directories.
-    /// </summary>
-    /// <returns>An array of accessible directory paths.</returns>
-    public static string[] ListAccessibleDirectories()
-    {
-        return FileValidationService.AccessibleDirectories.ToArray();
-    }
-
-    #region Helper Methods
-
-    private static object BuildDirectoryTree(System.IO.DirectoryInfo directoryInfo, bool respectGitignore = true, bool showHidden = false, bool includeGitFolders = false)
-    {
-        var result = new Dictionary<string, object>
-        {
-            ["name"] = directoryInfo.Name,
-            ["path"] = directoryInfo.FullName,
-            ["type"] = "directory",
-            ["created"] = directoryInfo.CreationTime,
-            ["modified"] = directoryInfo.LastWriteTime
-        };
-
-        // Load gitignore rules if needed
-        List<GitignoreRule> gitignoreRules = null;
-        if (respectGitignore)
-        {
-            gitignoreRules = GitignoreService.LoadGitignoreRules(directoryInfo.FullName);
-        }
-
-        // Process subdirectories
-        var subdirectories = directoryInfo.GetDirectories()
-            .Where(subDir => 
-                (includeGitFolders || !subDir.Name.Equals(".git", StringComparison.OrdinalIgnoreCase)) &&
-                (showHidden || (!subDir.Attributes.HasFlag(FileAttributes.Hidden) && !subDir.Name.StartsWith("."))) &&
-                (!respectGitignore || !GitignoreService.IsPathIgnored(subDir.FullName, true, gitignoreRules!)))
-            .ToList();
-            
-        // Process files
-        var files = directoryInfo.GetFiles()
-            .Where(file => 
-                (showHidden || (!file.Attributes.HasFlag(FileAttributes.Hidden) && !file.Name.StartsWith("."))) &&
-                (!respectGitignore || !GitignoreService.IsPathIgnored(file.FullName, false, gitignoreRules!)))
-            .ToList();
-
-        // Add directories and files count
-        result["directories"] = subdirectories.Count;
-        result["files"] = files.Count;
-        
-        // Prepare list with directories first, then files
-        var children = new List<object>();
-        
-        // Add subdirectories
-        foreach (var subDir in subdirectories)
-        {
-            children.Add(BuildDirectoryTree(subDir, respectGitignore, showHidden, includeGitFolders));
-        }
-        
-        // Add files more efficiently - just name and size
-        foreach (var file in files)
-        {
-            children.Add(new Dictionary<string, object>
-            {
-                ["name"] = file.Name,
-                ["type"] = "file",
-                ["size"] = FileTools.GetFileSize(file.Length)
+                    var dirInfo = new System.IO.DirectoryInfo(fullPath);
+                    return new DirectoryInfoContract
+                    {
+                        Name = dirInfo.Name,
+                        FullName = path, 
+                        CreationTime = dirInfo.CreationTimeUtc,
+                        LastAccessTime = dirInfo.LastAccessTimeUtc,
+                        LastWriteTime = dirInfo.LastWriteTimeUtc,
+                        Exists = true,
+                        ParentDirectory = Path.GetDirectoryName(path), // Relative parent path
+                        RootDirectory = Path.GetPathRoot(fullPath) 
+                    };
+                }
+                catch (Exception ex)
+                {
+                    return new DirectoryInfoContract { Name = Path.GetFileName(path), FullName = path, Exists = false, ErrorMessage = ex.Message };
+                }
             });
         }
         
-        result["children"] = children;
-        return result;
-    }
+        // Updated GetDirectoryTreeAsync to match FileTools expectations
+        public async Task<DirectoryTreeNode> GetDirectoryTreeAsync(string path, bool respectGitignore, int maxDepth = 3, bool includeFiles = true, int currentDepth = 0)
+        {
+            return await Task.Run(() =>
+            {
+                string fullPath = GetValidatedFullPath(path);
+                var dirInfoSystem = new System.IO.DirectoryInfo(fullPath);
+                string relativePath = path;
 
-    #endregion
+                if (!dirInfoSystem.Exists || currentDepth >= maxDepth)
+                {
+                    return new DirectoryTreeNode
+                    {
+                        Name = dirInfoSystem.Name,
+                        Path = relativePath,
+                        Type = dirInfoSystem.Exists ? "directory-depth-limit" : "directory-error",
+                        Children = new List<DirectoryTreeNode>()
+                    };
+                }
+
+                var node = new DirectoryTreeNode
+                {
+                    Name = dirInfoSystem.Name,
+                    Path = relativePath,
+                    Type = "directory",
+                    Children = new List<DirectoryTreeNode>()
+                };
+
+                List<GitignoreRule> gitignoreRules = respectGitignore ? GitignoreService.LoadGitignoreRules(fullPath) : new List<GitignoreRule>();
+
+                try
+                {
+                    foreach (var subDir in dirInfoSystem.GetDirectories().Where(d => !respectGitignore || !GitignoreService.IsPathIgnored(d.FullName, true, gitignoreRules)))
+                    {
+                        // Recursively call with async version, ensuring parameters are passed correctly
+                        // Note: This recursive call inside Task.Run might lead to nested tasks.
+                        // For deep recursion, consider a non-Task.Run approach or iterative method.
+                        node.Children.Add(GetDirectoryTreeAsync(Path.Combine(relativePath, subDir.Name), respectGitignore, maxDepth, includeFiles, currentDepth + 1).Result); // .Result is okay inside Task.Run if careful
+                    }
+
+                    if (includeFiles)
+                    {
+                        foreach (var file in dirInfoSystem.GetFiles().Where(f => !respectGitignore || !GitignoreService.IsPathIgnored(f.FullName, false, gitignoreRules)))
+                        {
+                            node.Children.Add(new DirectoryTreeNode
+                            {
+                                Name = file.Name,
+                                Path = Path.Combine(relativePath, file.Name),
+                                Type = "file",
+                                Size = file.Length
+                            });
+                        }
+                    }
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    node.Type = "directory-unauthorized";
+                }
+                catch (Exception ex)
+                {
+                    node.Type = "directory-error";
+                    // Optionally log ex.Message or add to node
+                    // For now, we acknowledge the variable 'ex' is captured but not directly used in this simplified error handling.
+                    // To suppress the warning if no logging is added: _ = ex;
+                }
+                return node;
+            });
+        }
+
+        // Updated ListDirectoryContentsAsync to match FileTools expectations
+        public async Task<IEnumerable<FileSystemEntry>> ListDirectoryContentsAsync(string path, bool respectGitignore)
+        {
+            return await Task.Run(() =>
+            {
+                string fullPath = GetValidatedFullPath(path);
+                var directoryInfoSystem = new System.IO.DirectoryInfo(fullPath);
+                string relativePath = path;
+
+                if (!directoryInfoSystem.Exists)
+                {
+                    // Consider throwing FileNotFoundException or DirectoryNotFoundException
+                    // return Enumerable.Empty<FileSystemEntry>(); 
+                    throw new DirectoryNotFoundException($"Directory not found: {path}");
+                }
+
+                var entries = new List<FileSystemEntry>();
+                List<GitignoreRule> gitignoreRules = respectGitignore ? GitignoreService.LoadGitignoreRules(fullPath) : new List<GitignoreRule>();
+
+                foreach (var dir in directoryInfoSystem.GetDirectories().Where(d => !respectGitignore || !GitignoreService.IsPathIgnored(d.FullName, true, gitignoreRules)))
+                {
+                    entries.Add(new FileSystemEntry
+                    {
+                        Name = dir.Name,
+                        Path = Path.Combine(relativePath, dir.Name),
+                        IsDirectory = true,
+                        Type = "directory",
+                        Size = 0,
+                        Created = dir.CreationTimeUtc,
+                        LastModified = dir.LastWriteTimeUtc
+                    });
+                }
+
+                foreach (var file in directoryInfoSystem.GetFiles().Where(f => !respectGitignore || !GitignoreService.IsPathIgnored(f.FullName, false, gitignoreRules)))
+                {
+                    entries.Add(new FileSystemEntry
+                    {
+                        Name = file.Name,
+                        Path = Path.Combine(relativePath, file.Name),
+                        IsDirectory = false,
+                        Type = "file",
+                        Size = file.Length,
+                        Created = file.CreationTimeUtc,
+                        LastModified = file.LastWriteTimeUtc
+                    });
+                }
+                return entries.AsEnumerable(); // Ensure it returns IEnumerable
+            });
+        }
+        
+        // Updated ReadFileAsync to handle line ranges and return ReadFileResponse
+        public async Task<ReadFileResponse> ReadFileAsync(string path, int? startLine = null, int? endLine = null)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath) || !File.Exists(fullPath))
+            {
+                return new ReadFileResponse { FilePath = path, ErrorMessage = "File path is invalid, not found, or access is denied.", Lines = Array.Empty<string>() };
+            }
+
+            try
+            {
+                var lines = await File.ReadAllLinesAsync(fullPath, Encoding.UTF8);
+                int actualStartLine = startLine.HasValue ? Math.Max(0, startLine.Value -1) : 0; // 0-based for Skip/Take
+                int actualEndLine = endLine.HasValue ? Math.Min(lines.Length -1, endLine.Value -1) : lines.Length -1; // 0-based for Skip/Take
+
+                if (actualStartLine > actualEndLine || actualStartLine >= lines.Length)
+                {
+                    return new ReadFileResponse { FilePath = path, Lines = Array.Empty<string>(), StartLine = startLine ?? 1, EndLine = endLine ?? lines.Length, TotalLines = lines.Length };
+                }
+                
+                var selectedLines = lines.Skip(actualStartLine).Take(actualEndLine - actualStartLine + 1).ToArray();
+                
+                return new ReadFileResponse
+                {
+                    FilePath = path,
+                    Lines = selectedLines,
+                    StartLine = actualStartLine + 1, // Return 1-based
+                    EndLine = actualEndLine + 1,   // Return 1-based
+                    TotalLines = lines.Length,
+                    FileSHA = await ComputeFileSHAAsync(fullPath)
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ReadFileResponse { FilePath = path, ErrorMessage = $"Error reading file: {ex.Message}", Lines = Array.Empty<string>() };
+            }
+        }
+        
+        private async Task<string> ComputeFileSHAAsync(string filePath) // Made async
+        {
+            try
+            {
+                using (var stream = File.OpenRead(filePath))
+                using (var sha256 = System.Security.Cryptography.SHA256.Create())
+                {
+                    byte[] hash = await sha256.ComputeHashAsync(stream);
+                    return BitConverter.ToString(hash).Replace("-", "").ToLowerInvariant();
+                }
+            }
+            catch
+            {
+                return string.Empty; 
+            }
+        }
+
+        // ReadFileContentAsync for full content as string (previously ReadFileAsync)
+        public async Task<string> ReadFileContentAsync(string path)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath) || !File.Exists(fullPath))
+            {
+                throw new FileNotFoundException("File not found or access denied.", path);
+            }
+            return await File.ReadAllTextAsync(fullPath, Encoding.UTF8);
+        }
+        
+        // WriteFileAsync remains largely the same
+        public async Task WriteFileAsync(string path, string content)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath))
+            {
+                throw new UnauthorizedAccessException("File path is invalid or write access is denied.");
+            }
+            // Ensure directory exists before writing
+            var directory = Path.GetDirectoryName(fullPath);
+            if (directory != null && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
+        }
+
+        // Updated EditFileAsync to use List<FileEdit> and dryRun
+        public async Task<EditResult> EditFileAsync(string path, List<FileEdit> edits, bool dryRun = false)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath) || !File.Exists(fullPath))
+            {
+                return new EditResult { Success = false, Message = "File path is invalid, not found, or write access is denied." };
+            }
+
+            try
+            {
+                var lines = new List<string>(await File.ReadAllLinesAsync(fullPath));
+                int editCount = 0;
+                string originalContentForDiff = string.Empty;
+                if (dryRun)
+                {
+                    originalContentForDiff = string.Join(Environment.NewLine, lines);
+                }
+
+
+                // Convert FileEdit to EditOperation for internal processing if needed, or adapt logic
+                // For now, assuming FileEdit has similar enough structure or adapting directly.
+                // The key difference is FileEdit.LineNumber (1-based) vs EditOperation.StartLine (0-based or 1-based depending on previous impl)
+                // And FileEdit.Text (string) vs EditOperation.Content (string[])
+                // Let's assume FileEdit.LineNumber is 1-based.
+
+                foreach (var edit in edits.OrderBy(e => e.LineNumber))
+                {
+                    int lineNumber0Based = edit.LineNumber - 1; // Convert to 0-based
+                    if (lineNumber0Based < 0) lineNumber0Based = 0;
+
+                    switch (edit.Type.ToString().ToUpper()) // Use .ToString() before .ToUpper()
+                    {
+                        case "INSERT":
+                            if (lineNumber0Based > lines.Count) lineNumber0Based = lines.Count;
+                            lines.Insert(lineNumber0Based, edit.Text ?? string.Empty);
+                            editCount++;
+                            break;
+                        case "DELETE":
+                            // FileEdit doesn't have an EndLine. Assuming it deletes a single line.
+                            if (lineNumber0Based < lines.Count)
+                            {
+                                lines.RemoveAt(lineNumber0Based);
+                                editCount++;
+                            }
+                            break;
+                        case "REPLACE": // Assuming replace means replace a single line
+                            if (lineNumber0Based < lines.Count)
+                            {
+                                lines[lineNumber0Based] = edit.Text ?? string.Empty;
+                                editCount++;
+                            }
+                            else if (lineNumber0Based == lines.Count) // If replacing a line that doesn't exist, treat as append
+                            {
+                                lines.Add(edit.Text ?? string.Empty);
+                                editCount++;
+                            }
+                            break;
+                    }
+                }
+
+                if (dryRun)
+                {
+                    string newContentForDiff = string.Join(Environment.NewLine, lines);
+                    // Simple diff for illustration, a proper diff library would be better.
+                    string diff = $"--- Original\n+++ Modified\n"; // Placeholder for actual diff
+                    if (originalContentForDiff != newContentForDiff) {
+                         diff += $"-{originalContentForDiff.Replace(Environment.NewLine, "\n-")}\n+{newContentForDiff.Replace(Environment.NewLine, "\n+")}";
+                    } else {
+                        diff += "No changes.";
+                    }
+                    return new EditResult { Success = true, Message = "Dry run completed.", Diff = diff, EditCount = editCount };
+                }
+                else
+                {
+                    await File.WriteAllLinesAsync(fullPath, lines);
+                    return new EditResult { Success = true, Message = "File edited successfully.", NewFileSHA = await ComputeFileSHAAsync(fullPath), EditCount = editCount };
+                }
+            }
+            catch (Exception ex)
+            {
+                return new EditResult { Success = false, Message = $"Error editing file: {ex.Message}" };
+            }
+        }
+
+        // Updated CreateDirectoryAsync
+        public async Task<DirectoryInfoContract> CreateDirectoryAsync(string path)
+        {
+            // No Task.Run needed if the operations are already I/O bound and we can use await.
+            // However, Directory.CreateDirectory is synchronous.
+            // To make this truly async if it were a long operation, Task.Run is appropriate.
+            // For now, let's keep Task.Run to match the pattern of other methods, but acknowledge it's not truly async here.
+            return await Task.Run(() => 
+            {
+                string fullPath = GetValidatedFullPath(path);
+                if (!FileValidationService.IsPathSafe(fullPath))
+                {
+                    throw new UnauthorizedAccessException("Directory path is invalid or write access is denied.");
+                }
+                System.IO.Directory.CreateDirectory(fullPath); // Corrected to System.IO.Directory
+                var dirInfo = new System.IO.DirectoryInfo(fullPath);
+                return new DirectoryInfoContract 
+                {
+                    Name = dirInfo.Name,
+                    FullName = path, 
+                    CreationTime = dirInfo.CreationTimeUtc,
+                    LastAccessTime = dirInfo.LastAccessTimeUtc,
+                    LastWriteTime = dirInfo.LastWriteTimeUtc,
+                    Exists = true,
+                    ParentDirectory = Path.GetDirectoryName(path),
+                    RootDirectory = Path.GetPathRoot(fullPath)
+                };
+            });
+        }
+
+        // CreateFileAsync (new, if needed, or ensure WriteFileAsync covers creation)
+        public async Task CreateFileAsync(string path, string? content = null)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath))
+            {
+                throw new UnauthorizedAccessException("File path is invalid or write access is denied.");
+            }
+            var directory = Path.GetDirectoryName(fullPath);
+            if (directory != null && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+            await File.WriteAllTextAsync(fullPath, content ?? string.Empty, Encoding.UTF8);
+        }
+
+        // Updated DeletePathAsync
+        public async Task DeletePathAsync(string path, bool recursive)
+        {
+            await Task.Run(() =>
+            {
+                string fullPath = GetValidatedFullPath(path);
+                if (!FileValidationService.IsPathSafe(fullPath))
+                {
+                    throw new UnauthorizedAccessException("Path is invalid or delete access is denied.");
+                }
+
+                if (File.Exists(fullPath))
+                {
+                    File.Delete(fullPath);
+                }
+                else if (Directory.Exists(fullPath))
+                {
+                    Directory.Delete(fullPath, recursive); // Use the recursive flag
+                }
+                else
+                {
+                    throw new FileNotFoundException("Path not found.", path);
+                }
+            });
+        }
+
+        // Updated MovePathAsync
+        public async Task MovePathAsync(string sourcePath, string destinationPath)
+        {
+            await Task.Run(() =>
+            {
+                string fullSourcePath = GetValidatedFullPath(sourcePath);
+                string fullDestinationPath = GetValidatedFullPath(destinationPath);
+
+                if (!FileValidationService.IsPathSafe(fullSourcePath) || !FileValidationService.IsPathSafe(fullDestinationPath))
+                {
+                    throw new UnauthorizedAccessException("Source or destination path is invalid or access is denied.");
+                }
+                
+                // Ensure destination directory exists for file moves
+                if (File.Exists(fullSourcePath)) {
+                    var destDir = Path.GetDirectoryName(fullDestinationPath);
+                    if(destDir != null && !Directory.Exists(destDir)) {
+                        Directory.CreateDirectory(destDir);
+                    }
+                    File.Move(fullSourcePath, fullDestinationPath);
+                }
+                else if (Directory.Exists(fullSourcePath))
+                {
+                     // For directory move, ensure parent of destination exists if destination itself is a new name
+                    var destParentDir = Path.GetDirectoryName(fullDestinationPath);
+                    if (destParentDir != null && !Directory.Exists(destParentDir) && !Directory.Exists(fullDestinationPath))
+                    {
+                        Directory.CreateDirectory(destParentDir);
+                    }
+                    Directory.Move(fullSourcePath, fullDestinationPath);
+                }
+                else
+                {
+                    throw new FileNotFoundException("Source path not found.", sourcePath);
+                }
+            });
+        }
+
+        // Updated CopyFileAsync
+        public async Task CopyFileAsync(string sourceFilePath, string destinationFilePath, bool overwrite)
+        {
+            await Task.Run(() =>
+            {
+                string fullSourcePath = GetValidatedFullPath(sourceFilePath);
+                string fullDestinationPath = GetValidatedFullPath(destinationFilePath);
+
+                if (!FileValidationService.IsPathSafe(fullSourcePath) || !FileValidationService.IsPathSafe(fullDestinationPath))
+                {
+                    throw new UnauthorizedAccessException("Source or destination path is invalid or copy access is denied.");
+                }
+                if (!File.Exists(fullSourcePath))
+                {
+                    throw new FileNotFoundException("Source file not found.", sourceFilePath);
+                }
+                // Ensure destination directory exists
+                var destDir = Path.GetDirectoryName(fullDestinationPath);
+                if(destDir != null && !Directory.Exists(destDir)) {
+                    Directory.CreateDirectory(destDir);
+                }
+                File.Copy(fullSourcePath, fullDestinationPath, overwrite);
+            });
+        }
+
+        // Updated CopyDirectoryAsync
+        public async Task CopyDirectoryAsync(string sourceDir, string destDir, bool overwriteFiles, bool respectGitignore)
+        {
+            await Task.Run(() => // Make the lambda async if await is used inside, or use .Result carefully
+            {
+                string fullSourceDir = GetValidatedFullPath(sourceDir);
+                string fullDestDir = GetValidatedFullPath(destDir);
+
+                if (!FileValidationService.IsPathSafe(fullSourceDir) || !FileValidationService.IsPathSafe(fullDestDir))
+                {
+                    throw new UnauthorizedAccessException("Source or destination path is invalid or copy access is denied.");
+                }
+
+                var dir = new System.IO.DirectoryInfo(fullSourceDir);
+                if (!dir.Exists)
+                {
+                    throw new DirectoryNotFoundException($"Source directory not found: {dir.FullName}");
+                }
+
+                Directory.CreateDirectory(fullDestDir);
+                List<GitignoreRule> gitignoreRules = respectGitignore ? GitignoreService.LoadGitignoreRules(fullSourceDir) : new List<GitignoreRule>();
+
+                foreach (System.IO.FileInfo file in dir.GetFiles().Where(f => !respectGitignore || !GitignoreService.IsPathIgnored(f.FullName, false, gitignoreRules)))
+                {
+                    string targetFilePath = Path.Combine(fullDestDir, file.Name);
+                    file.CopyTo(targetFilePath, overwriteFiles);
+                }
+
+                // Recursive copy
+                foreach (System.IO.DirectoryInfo subDir in dir.GetDirectories().Where(d => !respectGitignore || !GitignoreService.IsPathIgnored(d.FullName, true, gitignoreRules)))
+                {
+                    // For recursive calls, paths should be relative to the original source/dest for user,
+                    // but GetValidatedFullPath will make them absolute for internal use.
+                    // The CopyDirectoryAsync method itself expects paths that GetValidatedFullPath can handle.
+                    string newSourceRelativePath = Path.Combine(sourceDir, subDir.Name); 
+                    string newDestRelativePath = Path.Combine(destDir, subDir.Name);     
+                    CopyDirectoryAsync(newSourceRelativePath, newDestRelativePath, overwriteFiles, respectGitignore).Wait(); // .Wait() or .Result can be problematic, consider alternatives for deep recursion
+                }
+            });
+        }
+
+        // SearchFilesAsync (renamed from SearchFiles to align with FileTools expectation, and ensure it uses SearchService.SearchFilesAsync)
+        public async Task<IEnumerable<FileInfoContract>> SearchFilesAsync(string directoryPath, string pattern, bool respectGitignore, string[]? excludePatterns = null)
+        {
+            var filesFoundPaths = await SearchService.SearchFilesAsync(directoryPath, pattern, respectGitignore, excludePatterns);
+
+            var results = new List<FileInfoContract>();
+            foreach (var filePath in filesFoundPaths)
+            {
+                results.Add(new FileInfoContract { FullName = filePath, Name = Path.GetFileName(filePath), Exists = true }); 
+            }
+            return results;
+        }
+    }
 }

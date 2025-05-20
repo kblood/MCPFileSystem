@@ -5,7 +5,8 @@ using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using MCPFileSystem.Client;
-using MCPFileSystem.Example;
+using MCPFileSystem.Contracts;
+
 namespace MCPFileSystem.Example
 {
     class Program
@@ -92,7 +93,7 @@ namespace MCPFileSystem.Example
                 Console.WriteLine("\n5. Getting file information...");
                 var fileInfo = await client.GetFileInfoAsync("examples/test.txt");
                 Console.WriteLine($"Name: {fileInfo.Name}");
-                Console.WriteLine($"Path: {fileInfo.Path}");
+                // Console.WriteLine($"Path: {fileInfo.Path}"); // Path might not be on client's FileInfo, ensure it's on Contracts.FileInfoContract
                 Console.WriteLine($"Size: {fileInfo.Size} bytes");
                 Console.WriteLine($"Created: {fileInfo.Created}");
                 Console.WriteLine($"Modified: {fileInfo.Modified}");
@@ -139,14 +140,18 @@ namespace MCPFileSystem.Example
                 
                 // 13. Get directory tree
                 Console.WriteLine("\n13. Getting directory tree...");
-                var tree = await client.GetDirectoryTreeAsync("dir2:/");
+                var clientTree = await client.GetDirectoryTreeAsync("dir2:/"); 
                 Console.WriteLine("Directory tree:");
-                Helpers.PrintDirectoryTree(new MCPFileSystem.Example.DirectoryTreeNode {
-                    Name = tree.Name,
-                    Type = tree.Type,
-                    Size = tree.Size,
-                    Children = ConvertChildren(tree.Children)
-                }, 0);
+                
+                if (clientTree != null) // Check if clientTree is not null before converting
+                {
+                    var contractTree = ConvertClientNodeToContractNode(clientTree, "dir2:/"); // Pass initial path
+                    Helpers.PrintDirectoryTree(contractTree, 0);
+                }
+                else
+                {
+                    Console.WriteLine("Received null directory tree from client.");
+                }
                 
                 // 14. Search for files
                 Console.WriteLine("\n14. Searching for files...");
@@ -165,8 +170,8 @@ namespace MCPFileSystem.Example
                 // 15. Move a file
                 Console.WriteLine("\n15. Moving a file...");
                 await client.MoveFileAsync("dir1:/searchtest1.txt", "dir2:/moved_file.txt");
-                var pathInfo = await client.CheckExistsAsync("dir2:/moved_file.txt");
-                Console.WriteLine($"Moved file exists: {pathInfo.Exists} (Type: {pathInfo.Type})");
+                var pathInfoMoved = await client.CheckExistsAsync("dir2:/moved_file.txt"); // Renamed to avoid conflict
+                Console.WriteLine($"Moved file exists: {pathInfoMoved.Exists} (Type: {pathInfoMoved.Type})");
                 
                 // 16. Edit a file
                 Console.WriteLine("\n16. Editing a file...");
@@ -203,7 +208,7 @@ namespace MCPFileSystem.Example
                 Console.WriteLine("\nShutting down server...");
                 try
                 {
-                    if (!serverProcess.HasExited)
+                    if (serverProcess != null && !serverProcess.HasExited)
                     {
                         serverProcess.Kill();
                         serverProcess.WaitForExit(5000);
@@ -219,24 +224,30 @@ namespace MCPFileSystem.Example
             }
         }
         
-        private static List<MCPFileSystem.Example.DirectoryTreeNode> ConvertChildren(List<MCPFileSystem.Client.DirectoryTreeNode> children)
+        // Helper method to convert MCPFileSystem.Client.DirectoryTreeNode to MCPFileSystem.Contracts.DirectoryTreeNode
+        private static MCPFileSystem.Contracts.DirectoryTreeNode ConvertClientNodeToContractNode(MCPFileSystem.Client.DirectoryTreeNode clientNode, string currentPath)
         {
-            if (children == null) return null;
-            
-            var result = new List<MCPFileSystem.Example.DirectoryTreeNode>();
-            
-            foreach (var child in children)
+            // clientNode is already checked for null by the caller
+            var contractNode = new MCPFileSystem.Contracts.DirectoryTreeNode
             {
-                result.Add(new MCPFileSystem.Example.DirectoryTreeNode
+                Name = clientNode.Name,
+                Type = clientNode.Type,
+                Size = clientNode.Size,
+                Path = Path.Combine(currentPath, clientNode.Name) // Construct the path
+            };
+
+            if (clientNode.Children != null)
+            {
+                foreach (var clientChild in clientNode.Children)
                 {
-                    Name = child.Name,
-                    Type = child.Type,
-                    Size = child.Size,
-                    Children = ConvertChildren(child.Children)
-                });
+                    if(clientChild != null) // Add null check for children as well
+                    {
+                        contractNode.Children.Add(ConvertClientNodeToContractNode(clientChild, contractNode.Path)); // Recursive call, pass parent's path
+                    }
+                }
             }
             
-            return result;
+            return contractNode;
         }
     }
 }
