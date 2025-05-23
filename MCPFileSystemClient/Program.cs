@@ -578,11 +578,33 @@ namespace MCPFileSystem.Client
         /// <param name="path">Path to the file to edit</param>
         /// <param name="operations">List of edit operations to perform</param>
         /// <returns>Result of the edit operation</returns>
+        /// <summary>
+        /// Edits a file by applying a series of text replacements with proper JSON formatting validation
+        /// </summary>
+        /// <param name="path">Path to the file to edit</param>
+        /// <param name="operations">List of edit operations to perform</param>
+        /// <returns>Result of the edit operation</returns>
         public async Task<EditResult> EditFileAsync(string path, List<EditOperation> operations)
         {
             try
             {
                 Console.WriteLine($"EditFileAsync: {path}, {operations.Count} operations");
+                
+                // Validate operations before serializing
+                foreach (var op in operations)
+                {
+                    // Handle multi-line text by ensuring newlines are properly formatted as \n
+                    if (!string.IsNullOrEmpty(op.OldText))
+                    {
+                        op.OldText = op.OldText.Replace("\r\n", "\n").Replace("\r", "\n");
+                    }
+                    
+                    if (!string.IsNullOrEmpty(op.NewText))
+                    {
+                        op.NewText = op.NewText.Replace("\r\n", "\n").Replace("\r", "\n");
+                    }
+                }
+
                 var parameters = JsonSerializer.Serialize(new { path, operations });
                 var response = await SendMCPRequestAsync("edit", parameters);
                 var parsedResponse = ParseResponse(response);

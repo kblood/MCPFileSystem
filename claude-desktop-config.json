@@ -5,16 +5,6 @@
       "args": [
         "--root",
         "C:/LLM/Projects/ClaudeTest"
-      ],
-      "alwaysAllow": [
-        "read_file",
-        "list_directory", 
-        "directory_tree",
-        "get_file_info",
-        "list_allowed_directories",
-        "get_base_directory",
-        "list_files",
-        "search_files"
       ]
     }
   }
