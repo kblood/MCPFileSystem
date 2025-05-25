@@ -169,11 +169,11 @@ public static class FileTools
     /// <param name=\"dryRun\">Preview changes using git-style diff format.</param>
     /// <returns>Success message, diff result, or error message.</returns>
     [McpServerTool("edit_file")]
-    [Description("Make line-based edits to a text file. Edits should be a JSON string: '[{\"LineNumber\":1,\"Type\":\"INSERT\",\"Text\":\"new line\"}]'")]
+    [Description("Make line-based edits to a text file. Edits should be a JSON string: '[{\"LineNumber\":1,\"Type\":0,\"Text\":\"new line\"}]'")]
     public static async Task<string> EditFile(
         [Description("Path to the file to edit")]
         string path,
-        [Description("A JSON string representing a list of edits to apply. Each edit specifies LineNumber (1-based), Type (INSERT, DELETE, REPLACE) and Text.")]
+        [Description("A JSON string representing a list of edits to apply. Each edit specifies LineNumber (1-based), Type (0=INSERT, 1=DELETE, 2=REPLACE, 3=REPLACE_SECTION), Text, and optionally OldText and EndLine.")]
         string editsJson, // Changed to string to accept JSON
         [Description("Preview changes (if applicable, service might not support diff for all edit types)")]
         bool dryRun = false)
