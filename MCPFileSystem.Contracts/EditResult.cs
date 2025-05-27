@@ -9,4 +9,5 @@ public class EditResult
     // Retaining existing properties for now.
     public int EditCount { get; set; }
     public string Diff { get; set; } = string.Empty;
+    public string? PreservedEncoding { get; set; } // Added for encoding preservation tracking
 }

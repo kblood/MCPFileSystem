@@ -162,6 +162,78 @@ public static class FileTools
     }
 
     /// <summary>
+    /// Creates a new file or completely overwrites an existing file with new content, with encoding options.
+    /// </summary>
+    /// <param name=\"path\">Path to the file to create or overwrite.</param>
+    /// <param name=\"content\">Content to write to the file.</param>
+    /// <param name=\"encodingOptionsJson\">JSON string with encoding options. Format: {\"Encoding\":\"Utf8NoBom\",\"PreserveOriginalEncoding\":false}</param>
+    /// <returns>Success or error message.</returns>
+    [McpServerTool("write_file_with_encoding")]
+    [Description("Create a new file or completely overwrite an existing file with new content, with encoding options.")]
+    public static async Task<string> WriteFileWithEncoding(
+        [Description("Path to the file to create or overwrite")]
+        string path,
+        [Description("Content to write to the file")]
+        string content,
+        [Description("JSON string with encoding options. Format: {\"Encoding\":\"Utf8NoBom\",\"PreserveOriginalEncoding\":false}. Encoding options: Utf8NoBom, Utf8WithBom, Ascii, Utf16Le, Utf16Be, Utf32Le, SystemDefault, AutoDetect")]
+        string? encodingOptionsJson = null)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            
+            // Parse encoding options
+            FileWriteOptions? options = null;
+            if (!string.IsNullOrEmpty(encodingOptionsJson))
+            {
+                try
+                {
+                    options = JsonSerializer.Deserialize<FileWriteOptions>(encodingOptionsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+                }
+                catch (JsonException jsonEx)
+                {
+                    return JsonSerializer.Serialize(new { error = $"Invalid JSON format for encoding options: {jsonEx.Message}" }, DefaultJsonOptions);
+                }
+            }
+
+            // Use encoding-aware WriteFileAsync if options provided, otherwise use default
+            if (options != null)
+            {
+                await fileService.WriteFileAsync(path, content, options);
+            }
+            else
+            {
+                await fileService.WriteFileAsync(path, content);
+            }
+
+            // After writing, get file info to return SHA and other details
+            var fileInfo = await fileService.GetFileInfoAsync(path);
+            var sha = string.Empty;
+            string? detectedEncoding = null;
+            
+            if (fileInfo.Exists)
+            {
+                var readResponse = await fileService.ReadFileAsync(path, 1, 1); // Read first line to get SHA and encoding
+                sha = readResponse.FileSHA;
+                detectedEncoding = readResponse.Encoding;
+            }
+            
+            return JsonSerializer.Serialize(new 
+            { 
+                message = "File written successfully with encoding support.", 
+                path = path, 
+                sha = sha,
+                encoding = detectedEncoding,
+                options = options
+            }, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
+
+    /// <summary>
     /// Make line-based edits to a text file.
     /// </summary>
     /// <param name=\"path\">Path to the file to edit.</param>
@@ -694,6 +766,53 @@ public static class FileTools
         {
             var outlines = CodeAnalysisService.GetCodeOutlinesForDirectory(directoryPath, filePattern, recursive);
             return JsonSerializer.Serialize(outlines, DefaultJsonOptions);
+        }
+        catch (Exception ex)
+        {
+            return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
+        }
+    }
+
+    /// <summary>
+    /// Reads and returns the contents of a specified file with encoding detection/specification.
+    /// </summary>
+    /// <param name=\"filePath\">Absolute path to the file to read.</param>
+    /// <param name=\"startLine\">Optional start line (1-based).</param>
+    /// <param name=\"endLine\">Optional end line (1-based).</param>
+    /// <param name=\"forceEncoding\">Optional encoding to force. Options: Utf8NoBom, Utf8WithBom, Ascii, Utf16Le, Utf16Be, Utf32Le, SystemDefault, AutoDetect</param>
+    /// <returns>The contents of the file with encoding information, or an error message if the file cannot be read.</returns>
+    [McpServerTool("read_file_with_encoding")]
+    [Description("Reads and returns the contents of a specified file with encoding detection/specification.")]
+    public static async Task<string> ReadFileWithEncoding(
+        [Description("Absolute path to the file to read")]
+        string filePath,
+        [Description("Optional start line (1-based) to read from.")]
+        int? startLine = null,
+        [Description("Optional end line (1-based) to read up to (inclusive).")]
+        int? endLine = null,
+        [Description("Optional encoding to force. Options: Utf8NoBom, Utf8WithBom, Ascii, Utf16Le, Utf16Be, Utf32Le, SystemDefault, AutoDetect")]
+        string? forceEncoding = null)
+    {
+        try
+        {
+            var fileService = GetFileService();
+            
+            // Parse encoding if provided
+            FileEncoding? encodingToUse = null;
+            if (!string.IsNullOrEmpty(forceEncoding))
+            {
+                if (Enum.TryParse<FileEncoding>(forceEncoding, ignoreCase: true, out var parsedEncoding))
+                {
+                    encodingToUse = parsedEncoding;
+                }
+                else
+                {
+                    return JsonSerializer.Serialize(new { error = $"Invalid encoding '{forceEncoding}'. Valid options: Utf8NoBom, Utf8WithBom, Ascii, Utf16Le, Utf16Be, Utf32Le, SystemDefault, AutoDetect" }, DefaultJsonOptions);
+                }
+            }
+            
+            ReadFileResponse response = await fileService.ReadFileAsync(filePath, startLine, endLine, encodingToUse);
+            return JsonSerializer.Serialize(response, DefaultJsonOptions);
         }
         catch (Exception ex)
         {

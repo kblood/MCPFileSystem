@@ -83,7 +83,8 @@ namespace MCPFileSystem.Example
                 
                 // 4. Read file back
                 Console.WriteLine("\n4. Reading file content...");
-                string readContent = await client.ReadFileAsync("examples/test.txt");
+                var readResponse = await client.ReadFileAsync("examples/test.txt");
+                string readContent = string.Join(Environment.NewLine, readResponse.Lines ?? Array.Empty<string>());
                 Console.WriteLine("File content:");
                 Console.WriteLine("--------------------------------------------------");
                 Console.WriteLine(readContent);
@@ -189,7 +190,8 @@ namespace MCPFileSystem.Example
                 Console.WriteLine("Diff:\n" + editResult.Diff);
                 
                 // Read the edited file to verify changes
-                string editedContent = await client.ReadFileAsync("dir1:/edit_test.txt");
+                var editedResponse = await client.ReadFileAsync("dir1:/edit_test.txt");
+                string editedContent = string.Join(Environment.NewLine, editedResponse.Lines ?? Array.Empty<string>());
                 Console.WriteLine("Edited file content:");
                 Console.WriteLine("--------------------------------------------------");
                 Console.WriteLine(editedContent);

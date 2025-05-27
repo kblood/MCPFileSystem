@@ -1,4 +1,5 @@
 ﻿using MCPFileSystem.Contracts;
+using MCPFileSystemServer.Utilities;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -184,13 +185,12 @@ namespace MCPFileSystemServer.Services
                 catch (UnauthorizedAccessException)
                 {
                     node.Type = "directory-unauthorized";
-                }
-                catch (Exception ex)
+                }                catch (Exception ex)
                 {
                     node.Type = "directory-error";
                     // Optionally log ex.Message or add to node
                     // For now, we acknowledge the variable 'ex' is captured but not directly used in this simplified error handling.
-                    // To suppress the warning if no logging is added: _ = ex;
+                    _ = ex; // Suppress unused variable warning
                 }
                 return node;
             });
@@ -243,46 +243,7 @@ namespace MCPFileSystemServer.Services
                     });
                 }
                 return entries.AsEnumerable(); // Ensure it returns IEnumerable
-            });
-        }
-        
-        // Updated ReadFileAsync to handle line ranges and return ReadFileResponse
-        public async Task<ReadFileResponse> ReadFileAsync(string path, int? startLine = null, int? endLine = null)
-        {
-            string fullPath = GetValidatedFullPath(path);
-            if (!FileValidationService.IsPathSafe(fullPath) || !File.Exists(fullPath))
-            {
-                return new ReadFileResponse { FilePath = path, ErrorMessage = "File path is invalid, not found, or access is denied.", Lines = Array.Empty<string>() };
-            }
-
-            try
-            {
-                var lines = await File.ReadAllLinesAsync(fullPath, Encoding.UTF8);
-                int actualStartLine = startLine.HasValue ? Math.Max(0, startLine.Value -1) : 0; // 0-based for Skip/Take
-                int actualEndLine = endLine.HasValue ? Math.Min(lines.Length -1, endLine.Value -1) : lines.Length -1; // 0-based for Skip/Take
-
-                if (actualStartLine > actualEndLine || actualStartLine >= lines.Length)
-                {
-                    return new ReadFileResponse { FilePath = path, Lines = Array.Empty<string>(), StartLine = startLine ?? 1, EndLine = endLine ?? lines.Length, TotalLines = lines.Length };
-                }
-                
-                var selectedLines = lines.Skip(actualStartLine).Take(actualEndLine - actualStartLine + 1).ToArray();
-                
-                return new ReadFileResponse
-                {
-                    FilePath = path,
-                    Lines = selectedLines,
-                    StartLine = actualStartLine + 1, // Return 1-based
-                    EndLine = actualEndLine + 1,   // Return 1-based
-                    TotalLines = lines.Length,
-                    FileSHA = await ComputeFileSHAAsync(fullPath)
-                };
-            }
-            catch (Exception ex)
-            {
-                return new ReadFileResponse { FilePath = path, ErrorMessage = $"Error reading file: {ex.Message}", Lines = Array.Empty<string>() };
-            }
-        }
+            });        }
         
         private async Task<string> ComputeFileSHAAsync(string filePath) // Made async
         {
@@ -298,20 +259,8 @@ namespace MCPFileSystemServer.Services
             catch
             {
                 return string.Empty; 
-            }
-        }
+            }        }
 
-        // ReadFileContentAsync for full content as string (previously ReadFileAsync)
-        public async Task<string> ReadFileContentAsync(string path)
-        {
-            string fullPath = GetValidatedFullPath(path);
-            if (!FileValidationService.IsPathSafe(fullPath) || !File.Exists(fullPath))
-            {
-                throw new FileNotFoundException("File not found or access denied.", path);
-            }
-            return await File.ReadAllTextAsync(fullPath, Encoding.UTF8);
-        }
-        
         // WriteFileAsync remains largely the same
         public async Task WriteFileAsync(string path, string content)
         {
@@ -327,6 +276,130 @@ namespace MCPFileSystemServer.Services
                 Directory.CreateDirectory(directory);
             }
             await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
+        }
+
+        // Enhanced WriteFileAsync with encoding options
+        public async Task WriteFileAsync(string path, string content, FileWriteOptions options)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath))
+            {
+                throw new UnauthorizedAccessException("File path is invalid or write access is denied.");
+            }
+
+            // Ensure directory exists before writing
+            var directory = Path.GetDirectoryName(fullPath);
+            if (directory != null && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            // Determine the encoding to use
+            Encoding encodingToUse;
+            if (options.PreserveOriginalEncoding && File.Exists(fullPath))
+            {
+                // Detect and preserve the original encoding
+                var detectedEncoding = await EncodingUtility.DetectFileEncodingAsync(fullPath);
+                encodingToUse = EncodingUtility.ToSystemEncoding(detectedEncoding);
+            }
+            else if (options.Encoding == FileEncoding.AutoDetect)
+            {
+                // For auto-detect mode when writing, use UTF-8 without BOM as default
+                encodingToUse = EncodingUtility.ToSystemEncoding(FileEncoding.Utf8NoBom);
+            }
+            else
+            {
+                // Use the specified encoding
+                encodingToUse = EncodingUtility.ToSystemEncoding(options.Encoding);
+            }
+
+            await File.WriteAllTextAsync(fullPath, content, encodingToUse);
+        }
+
+        // Enhanced ReadFileContentAsync with encoding detection
+        public async Task<string> ReadFileContentAsync(string path, FileEncoding? forceEncoding = null)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath) || !File.Exists(fullPath))
+            {
+                throw new FileNotFoundException("File not found or access denied.", path);
+            }
+
+            Encoding encodingToUse;
+            if (forceEncoding.HasValue && forceEncoding.Value != FileEncoding.AutoDetect)
+            {
+                // Use the specified encoding
+                encodingToUse = EncodingUtility.ToSystemEncoding(forceEncoding.Value);
+            }
+            else
+            {
+                // Auto-detect encoding
+                var detectedEncoding = await EncodingUtility.DetectFileEncodingAsync(fullPath);
+                encodingToUse = EncodingUtility.ToSystemEncoding(detectedEncoding);
+            }
+
+            return await File.ReadAllTextAsync(fullPath, encodingToUse);
+        }
+
+        // Enhanced ReadFileAsync with encoding detection
+        public async Task<ReadFileResponse> ReadFileAsync(string path, int? startLine = null, int? endLine = null, FileEncoding? forceEncoding = null)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath) || !File.Exists(fullPath))
+            {
+                return new ReadFileResponse { FilePath = path, ErrorMessage = "File path is invalid, not found, or access is denied.", Lines = Array.Empty<string>() };
+            }
+
+            try
+            {
+                Encoding encodingToUse;
+                FileEncoding detectedEncoding = FileEncoding.Utf8NoBom;
+                
+                if (forceEncoding.HasValue && forceEncoding.Value != FileEncoding.AutoDetect)
+                {
+                    // Use the specified encoding
+                    encodingToUse = EncodingUtility.ToSystemEncoding(forceEncoding.Value);
+                    detectedEncoding = forceEncoding.Value;
+                }
+                else
+                {
+                    // Auto-detect encoding
+                    detectedEncoding = await EncodingUtility.DetectFileEncodingAsync(fullPath);
+                    encodingToUse = EncodingUtility.ToSystemEncoding(detectedEncoding);
+                }                var lines = await File.ReadAllLinesAsync(fullPath, encodingToUse);
+                int actualStartLine = startLine.HasValue ? Math.Max(0, startLine.Value - 1) : 0; // 0-based for Skip/Take
+                int actualEndLine = endLine.HasValue ? Math.Min(lines.Length - 1, endLine.Value - 1) : lines.Length - 1; // 0-based for Skip/Take
+                
+                if (actualStartLine > actualEndLine || actualStartLine >= lines.Length)
+                {
+                    return new ReadFileResponse 
+                    { 
+                        FilePath = path, 
+                        Lines = Array.Empty<string>(), 
+                        StartLine = startLine ?? 1, 
+                        EndLine = endLine ?? lines.Length, 
+                        TotalLines = lines.Length,
+                        Encoding = detectedEncoding.ToString()
+                    };
+                }
+
+                var selectedLines = lines.Skip(actualStartLine).Take(actualEndLine - actualStartLine + 1).ToArray();
+
+                return new ReadFileResponse
+                {
+                    FilePath = path,
+                    Lines = selectedLines,
+                    StartLine = actualStartLine + 1, // Return 1-based
+                    EndLine = actualEndLine + 1,   // Return 1-based
+                    TotalLines = lines.Length,
+                    FileSHA = await ComputeFileSHAAsync(fullPath),
+                    Encoding = detectedEncoding.ToString()
+                };
+            }
+            catch (Exception ex)
+            {
+                return new ReadFileResponse { FilePath = path, ErrorMessage = $"Error reading file: {ex.Message}", Lines = Array.Empty<string>() };
+            }
         }
 
         // Updated EditFileAsync to include SectionReplace functionality
@@ -465,6 +538,164 @@ namespace MCPFileSystemServer.Services
             }
         }
 
+        // Enhanced EditFileAsync with encoding preservation
+        public async Task<EditResult> EditFileAsync(string path, List<FileEdit> edits, bool dryRun = false, bool preserveEncoding = true)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath) || !File.Exists(fullPath))
+            {
+                return new EditResult { Success = false, Message = "File path is invalid, not found, or write access is denied." };
+            }
+
+            try
+            {
+                // Detect original encoding if preserving
+                FileEncoding originalEncoding = FileEncoding.Utf8NoBom;
+                Encoding encodingToUse = Encoding.UTF8;
+                
+                if (preserveEncoding)
+                {
+                    originalEncoding = await EncodingUtility.DetectFileEncodingAsync(fullPath);
+                    encodingToUse = EncodingUtility.ToSystemEncoding(originalEncoding);
+                }
+
+                var lines = new List<string>(await File.ReadAllLinesAsync(fullPath, encodingToUse));
+                int editCount = 0;
+                string originalContentForDiff = string.Empty;
+                if (dryRun)
+                {
+                    originalContentForDiff = string.Join(Environment.NewLine, lines);
+                }
+
+                // Process edits in order by line number to ensure predictable results
+                foreach (var edit in edits.OrderBy(e => e.LineNumber))
+                {
+                    int lineNumber0Based = edit.LineNumber - 1; // Convert to 0-based
+                    if (lineNumber0Based < 0) lineNumber0Based = 0;
+
+                    switch (edit.Type)
+                    {
+                        case EditType.Insert:
+                            if (lineNumber0Based > lines.Count) lineNumber0Based = lines.Count;
+                            lines.Insert(lineNumber0Based, edit.Text ?? string.Empty);
+                            editCount++;
+                            break;
+                            
+                        case EditType.Delete:
+                            if (lineNumber0Based < lines.Count)
+                            {
+                                lines.RemoveAt(lineNumber0Based);
+                                editCount++;
+                            }
+                            break;
+                            
+                        case EditType.Replace:
+                            if (lineNumber0Based < lines.Count)
+                            {
+                                // If OldText is specified, only replace that part of the line
+                                if (!string.IsNullOrEmpty(edit.OldText) && lines[lineNumber0Based].Contains(edit.OldText))
+                                {
+                                    lines[lineNumber0Based] = lines[lineNumber0Based].Replace(edit.OldText, edit.Text ?? string.Empty);
+                                }
+                                else
+                                {
+                                    // Replace the entire line
+                                    lines[lineNumber0Based] = edit.Text ?? string.Empty;
+                                }
+                                editCount++;
+                            }
+                            else if (lineNumber0Based == lines.Count) // If replacing a line that doesn't exist, treat as append
+                            {
+                                lines.Add(edit.Text ?? string.Empty);
+                                editCount++;
+                            }
+                            break;
+                            
+                        case EditType.ReplaceSection:
+                            // Handle section replacement
+                            if (edit.EndLine.HasValue && edit.EndLine.Value >= edit.LineNumber)
+                            {
+                                int endLine0Based = edit.EndLine.Value - 1; // Convert to 0-based
+                                
+                                // Ensure we don't go out of bounds
+                                if (lineNumber0Based < lines.Count)
+                                {
+                                    // Ensure endLine is within bounds
+                                    endLine0Based = Math.Min(endLine0Based, lines.Count - 1);
+                                    
+                                    // Calculate how many lines to remove
+                                    int linesToRemove = endLine0Based - lineNumber0Based + 1;
+                                    
+                                    // Remove the lines in the section
+                                    lines.RemoveRange(lineNumber0Based, linesToRemove);
+                                    
+                                    // If there's replacement text, split it into lines and insert
+                                    if (!string.IsNullOrEmpty(edit.Text))
+                                    {
+                                        string[] newLines = edit.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                                        for (int i = 0; i < newLines.Length; i++)
+                                        {
+                                            lines.Insert(lineNumber0Based + i, newLines[i]);
+                                        }
+                                    }
+                                    
+                                    editCount++;
+                                }
+                                else if (lineNumber0Based == lines.Count) // If replacing a section that doesn't exist, treat as append
+                                {
+                                    // If there's replacement text, split it into lines and append
+                                    if (!string.IsNullOrEmpty(edit.Text))
+                                    {
+                                        string[] newLines = edit.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+                                        foreach (var line in newLines)
+                                        {
+                                            lines.Add(line);
+                                        }
+                                    }
+                                    
+                                    editCount++;
+                                }
+                            }
+                            break;
+                    }
+                }
+
+                if (dryRun)
+                {
+                    string newContentForDiff = string.Join(Environment.NewLine, lines);
+                    // Simple diff for illustration, a proper diff library would be better.
+                    string diff = $"--- Original\n+++ Modified\n"; // Placeholder for actual diff
+                    if (originalContentForDiff != newContentForDiff) {
+                         diff += $"-{originalContentForDiff.Replace(Environment.NewLine, "\n-")}\n+{newContentForDiff.Replace(Environment.NewLine, "\n+")}";
+                    } else {
+                        diff += "No changes.";
+                    }
+                    return new EditResult { 
+                        Success = true, 
+                        Message = "Dry run completed.", 
+                        Diff = diff, 
+                        EditCount = editCount,
+                        PreservedEncoding = preserveEncoding ? originalEncoding.ToString() : null
+                    };
+                }
+                else
+                {
+                    await File.WriteAllLinesAsync(fullPath, lines, encodingToUse);
+                    return new EditResult { 
+                        Success = true, 
+                        Message = "File edited successfully.", 
+                        NewFileSHA = await ComputeFileSHAAsync(fullPath), 
+                        EditCount = editCount,
+                        PreservedEncoding = preserveEncoding ? originalEncoding.ToString() : null
+                    };
+                }
+            }
+            catch (Exception ex)
+            {
+                return new EditResult { Success = false, Message = $"Error editing file: {ex.Message}" };
+            }
+        }
+
         // Updated CreateDirectoryAsync
         public async Task<DirectoryInfoContract> CreateDirectoryAsync(string path)
         {
@@ -509,6 +740,31 @@ namespace MCPFileSystemServer.Services
                 Directory.CreateDirectory(directory);
             }
             await File.WriteAllTextAsync(fullPath, content ?? string.Empty, Encoding.UTF8);
+        }
+
+        // Enhanced CreateFileAsync with encoding options
+        public async Task CreateFileAsync(string path, string? content = null, FileWriteOptions? options = null)
+        {
+            string fullPath = GetValidatedFullPath(path);
+            if (!FileValidationService.IsPathSafe(fullPath))
+            {
+                throw new UnauthorizedAccessException("File path is invalid or write access is denied.");
+            }
+            var directory = Path.GetDirectoryName(fullPath);
+            if (directory != null && !Directory.Exists(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            if (options != null)
+            {
+                // Use encoding-aware WriteFileAsync
+                await WriteFileAsync(path, content ?? string.Empty, options);
+            }
+            else
+            {
+                await File.WriteAllTextAsync(fullPath, content ?? string.Empty, Encoding.UTF8);
+            }
         }
 
         // Updated DeletePathAsync
