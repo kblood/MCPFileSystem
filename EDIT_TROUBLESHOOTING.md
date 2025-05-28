@@ -2,32 +2,49 @@
 
 ## 🚨 Common Errors and Solutions
 
-This guide addresses the most frequently encountered errors when using the `edit_file` tool.
+This guide addresses the most frequently encountered errors when using the `edit_file` tool. Note: Only Replace operations are supported.
 
-## Error 1: "Invalid JSON format for edits"
+## Error 1: "Unsupported edit type"
 
-### ❌ Problem: Wrong Enum Values
-```json
-[{"LineNumber": 5, "Type": "INSERT", "Text": "new line"}]
-```
-**Error**: `The JSON value could not be converted to EditType`
-
-### ✅ Solution: Use Correct Enum Values
+### ❌ Problem: Using Unsupported Operation Types
 ```json
 [{"LineNumber": 5, "Type": "Insert", "Text": "new line"}]
 ```
+**Error**: `Unsupported edit type: Insert. Only Replace operations are supported.`
 
-**Correct Values**: `"Insert"`, `"Delete"`, `"Replace"`, `"ReplaceSection"`
+### ✅ Solution: Use Only Replace Operations
+```json
+[{"LineNumber": 5, "Type": "Replace", "Text": "new line"}]
+```
+
+**Only Supported Value**: `"Replace"`
 
 ---
 
-## Error 2: "Unterminated string" JSON Error
+## Error 2: "Invalid JSON format for edits"
+
+### ❌ Problem: Wrong Enum Values
+```json
+[{"LineNumber": 5, "Type": "REPLACE", "Text": "new line"}]
+```
+**Error**: `The JSON value could not be converted to EditType`
+
+### ✅ Solution: Use Correct Enum Value
+```json
+[{"LineNumber": 5, "Type": "Replace", "Text": "new line"}]
+```
+
+**Correct Value**: `"Replace"` (case-sensitive)
+
+---
+
+## Error 3: "Unterminated string" JSON Error
 
 ### ❌ Problem: Unescaped Newlines
 ```json
 [{
   "LineNumber": 5,
-  "Type": "Insert",
+  "Type": "Replace",
   "Text": "line1
 line2"
 }]
@@ -35,54 +52,46 @@ line2"
 
 ### ✅ Solution: Escape Newlines with \\n
 ```json
-[{"LineNumber": 5, "Type": "Insert", "Text": "line1\\nline2"}]
+[{"LineNumber": 5, "Type": "Replace", "Text": "line1\\nline2"}]
 ```
 
 ---
 
-## Error 3: "Unexpected character" JSON Error
+## Error 4: "Unexpected character" JSON Error
 
 ### ❌ Problem: Unescaped Quotes
 ```json
-[{"LineNumber": 5, "Type": "Insert", "Text": "console.log("Hello");"}]
+[{"LineNumber": 5, "Type": "Replace", "Text": "console.log("Hello");"}]
 ```
 
 ### ✅ Solution: Escape Quotes with \\"
 ```json
-[{"LineNumber": 5, "Type": "Insert", "Text": "console.log(\\"Hello\\");"}]
+[{"LineNumber": 5, "Type": "Replace", "Text": "console.log(\\"Hello\\");"}]
 ```
 
 ---
 
-## Error 4: "Required property missing"
+## Error 5: "Required property missing"
 
-### ❌ Problem: Missing Text Field for Insert
+### ❌ Problem: Missing Text Field for Replace
 ```json
-[{"LineNumber": 5, "Type": "Insert"}]
+[{"LineNumber": 5, "Type": "Replace"}]
 ```
 
 ### ✅ Solution: Include Required Fields
 ```json
-[{"LineNumber": 5, "Type": "Insert", "Text": "new content"}]
+[{"LineNumber": 5, "Type": "Replace", "Text": "new content"}]
 ```
 
-**Required Fields by Type**:
-- **Insert**: `LineNumber`, `Type`, `Text`
-- **Delete**: `LineNumber`, `Type`
-- **Replace**: `LineNumber`, `Type`, `Text`
-- **ReplaceSection**: `LineNumber`, `Type`, `Text`, `EndLine`
+**Required Fields for Replace**:
+- `LineNumber`: Line number to edit (1-based)
+- `Type`: Must be "Replace"
+- `Text`: Replacement content
 
----
+**Optional Fields**:
+- `OldText`: Specific text to replace within the line (if omitted, replaces entire line)
 
-## Error 5: "EndLine must be specified for ReplaceSection"
-
-### ❌ Problem: Missing EndLine for ReplaceSection
-```json
-[{"LineNumber": 10, "Type": "ReplaceSection", "Text": "new content"}]
-```
-
-### ✅ Solution: Include EndLine
-```json
+---json
 [{"LineNumber": 10, "Type": "ReplaceSection", "EndLine": 15, "Text": "new content"}]
 ```
 
@@ -90,20 +99,22 @@ line2"
 
 ## Error 6: "Line number out of range"
 
+## Error 6: "Invalid Line Numbers"
+
 ### ❌ Problem: Invalid Line Numbers
 ```json
-[{"LineNumber": 0, "Type": "Insert", "Text": "new line"}]
+[{"LineNumber": 0, "Type": "Replace", "Text": "new line"}]
 ```
 
 ### ✅ Solution: Use 1-Based Line Numbers
 ```json
-[{"LineNumber": 1, "Type": "Insert", "Text": "new line"}]
+[{"LineNumber": 1, "Type": "Replace", "Text": "new line"}]
 ```
 
 **Line Number Rules**:
 - **Minimum**: 1 (first line)
-- **Maximum**: Any number (automatically appends to end if beyond file)
-- **Delete operations**: Must be within existing file range
+- **Maximum**: Any number within existing file range for Replace operations
+- Line must exist in the file for Replace operations
 
 ---
 
@@ -111,14 +122,14 @@ line2"
 
 ✅ **Before Submitting Your Edit JSON**:
 
-1. **Enum Values**: `"Insert"`, `"Delete"`, `"Replace"`, `"ReplaceSection"` (exact case)
+1. **Operation Type**: Only `"Replace"` is supported (exact case)
 2. **Newlines**: Use `\\n` for multi-line content
 3. **Quotes**: Escape literal quotes as `\\"` 
 4. **Backslashes**: Escape as `\\\\` 
-5. **Required Fields**: Include all required properties per operation type
-6. **Line Numbers**: Use 1-based numbering
+5. **Required Fields**: `LineNumber`, `Type`, `Text`
+6. **Line Numbers**: Use 1-based numbering for existing lines
 7. **JSON Syntax**: Valid JSON array structure
-8. **EndLine**: Required for `"ReplaceSection"` operations
+8. **OldText**: Optional field for precise text replacement within line
 
 ---
 
@@ -126,7 +137,7 @@ line2"
 
 ### Test with Simple Operations First
 ```json
-[{"LineNumber": 1, "Type": "Insert", "Text": "simple test"}]
+[{"LineNumber": 1, "Type": "Replace", "Text": "simple test"}]
 ```
 
 ### Use Dry Run for Preview
@@ -135,7 +146,7 @@ line2"
   "tool": "edit_file",
   "arguments": {
     "path": "test.txt",
-    "editsJson": "[{\"LineNumber\": 1, \"Type\": \"Insert\", \"Text\": \"test\"}]",
+    "editsJson": "[{\"LineNumber\": 1, \"Type\": \"Replace\", \"Text\": \"test\"}]",
     "dryRun": true
   }
 }
@@ -152,40 +163,30 @@ Use online JSON validators like:
 
 | Error Contains | Likely Cause | Solution |
 |----------------|--------------|----------|
+| "Unsupported edit type" | Wrong operation type | Use only "Replace" |
 | "EditType" | Wrong enum value | Check capitalization |
 | "Unterminated string" | Unescaped newline | Use `\\n` |
 | "Unexpected character" | Unescaped quote | Use `\\"` |
 | "Required property" | Missing field | Add required properties |
 | "out of range" | Invalid line number | Use 1-based numbers |
-| "EndLine must be" | ReplaceSection missing EndLine | Add EndLine property |
 
 ---
 
 ## Template for Copy-Paste Testing
 
-### Insert Template
-```json
-[{"LineNumber": 1, "Type": "Insert", "Text": "your content here"}]
-```
-
-### Multi-line Insert Template  
-```json
-[{"LineNumber": 1, "Type": "Insert", "Text": "line1\\nline2\\nline3"}]
-```
-
-### Replace Template
+### Replace Template (Basic)
 ```json
 [{"LineNumber": 1, "Type": "Replace", "Text": "replacement content"}]
 ```
 
-### Delete Template
+### Replace Template (With OldText)
 ```json
-[{"LineNumber": 1, "Type": "Delete"}]
+[{"LineNumber": 1, "Type": "Replace", "OldText": "old text", "Text": "new text"}]
 ```
 
-### ReplaceSection Template
+### Multi-line Replace Template  
 ```json
-[{"LineNumber": 1, "Type": "ReplaceSection", "EndLine": 3, "Text": "new section content"}]
+[{"LineNumber": 1, "Type": "Replace", "Text": "line1\\nline2\\nline3"}]
 ```
 
 ---
@@ -198,4 +199,4 @@ Use online JSON validators like:
 4. **Test with dry-run**: Always preview complex operations
 5. **Start simple**: Test basic operations before complex ones
 
-**Remember**: The most common error is using wrong enum values (`"INSERT"` vs `"Insert"`)!
+**Remember**: Only "Replace" operations are supported. The most common error is using wrong enum values (`"REPLACE"` vs `"Replace"`)!

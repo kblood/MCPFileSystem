@@ -231,39 +231,44 @@ public static class FileTools
         {
             return JsonSerializer.Serialize(new { error = ex.Message }, DefaultJsonOptions);
         }
-    }
-
-    /// <summary>
-    /// Make line-based edits to a text file.
+    }    /// <summary>
+    /// Make replace-based edits to a text file.
     /// </summary>
     /// <param name=\"path\">Path to the file to edit.</param>
-    /// <param name=\"editsJson\">A JSON string representing a list of edits to apply.</param>
+    /// <param name=\"editsJson\">A JSON string representing a list of replace edits to apply.</param>
     /// <param name=\"dryRun\">Preview changes using git-style diff format.</param>
     /// <returns>Success message, diff result, or error message.</returns>
     [McpServerTool("edit_file")]
-    [Description("Make line-based edits to a text file. Edits should be a JSON string: '[{\"LineNumber\":1,\"Type\":0,\"Text\":\"new line\"}]'")]
+    [Description("Make replace-based edits to a text file. Only Replace operations are supported. Edits should be a JSON string: '[{\"LineNumber\":1,\"Type\":\"Replace\",\"Text\":\"new content\",\"OldText\":\"old content\"}]'")]
     public static async Task<string> EditFile(
         [Description("Path to the file to edit")]
         string path,
-        [Description("A JSON string representing a list of edits to apply. Each edit specifies LineNumber (1-based), Type (0=INSERT, 1=DELETE, 2=REPLACE, 3=REPLACE_SECTION), Text, and optionally OldText and EndLine.")]
+        [Description("A JSON string representing a list of replace edits to apply. Each edit must specify LineNumber (1-based), Type (must be 'Replace'), Text (replacement text), and optionally OldText (specific text to replace within the line).")]
         string editsJson, // Changed to string to accept JSON
-        [Description("Preview changes (if applicable, service might not support diff for all edit types)")]
+        [Description("Preview changes without applying them")]
         bool dryRun = false)
-    {
-        try
+    {        try
         {
-            List<FileEdit>? edits;
-            try
+            // Use the improved JSON helper for better validation and error messages
+            var (edits, validationErrors) = FileEditJsonHelper.DeserializeEdits(editsJson);
+            
+            if (validationErrors.Any())
             {
-                edits = JsonSerializer.Deserialize<List<FileEdit>>(editsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-                if (edits == null || !edits.Any())
+                var errorMessage = $"Validation errors: {string.Join("; ", validationErrors)}";
+                
+                // Add helpful example for common issues
+                if (validationErrors.Any(e => e.Contains("newline") || e.Contains("Unterminated")))
                 {
-                    return JsonSerializer.Serialize(new { error = "Edits list cannot be null or empty." }, DefaultJsonOptions);
+                    errorMessage += "\n\nExample of correct multi-line JSON:\n" +
+                                   "[{\"LineNumber\":1,\"Type\":\"Replace\",\"Text\":\"line1\\nline2\"}]";
                 }
+                
+                return JsonSerializer.Serialize(new { error = errorMessage }, DefaultJsonOptions);
             }
-            catch (JsonException jsonEx)
+
+            if (edits == null || !edits.Any())
             {
-                return JsonSerializer.Serialize(new { error = $"Invalid JSON format for edits: {jsonEx.Message}" }, DefaultJsonOptions);
+                return JsonSerializer.Serialize(new { error = "No valid edits provided." }, DefaultJsonOptions);
             }
             
             var fileService = GetFileService();

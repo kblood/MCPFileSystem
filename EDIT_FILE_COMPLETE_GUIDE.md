@@ -2,49 +2,31 @@
 
 ## Overview
 
-The `edit_file` tool in MCPFileSystem provides powerful line-based editing capabilities for text files. This guide provides complete examples with correct JSON formatting to avoid common errors.
+The `edit_file` tool in MCPFileSystem provides reliable replace-based editing capabilities for text files. This guide provides complete examples with correct JSON formatting to avoid common errors.
 
 ## ⚠️ Critical: JSON Format Requirements
 
-The `editsJson` parameter must be a **JSON string** that deserializes to an array of `FileEdit` objects. Each edit operation has specific properties that must match exactly.
+The `editsJson` parameter must be a **JSON string** that deserializes to an array of `FileEdit` objects. Only Replace operations are supported for maximum reliability.
 
 ## FileEdit Object Structure
 
 ```typescript
 interface FileEdit {
     LineNumber: number;      // 1-based line number
-    Type: string;           // "Insert", "Delete", "Replace", or "ReplaceSection"
-    Text?: string;          // Content for Insert/Replace operations
-    OldText?: string;       // For Replace: specific text to replace within line
-    EndLine?: number;       // For ReplaceSection: ending line number
+    Type: string;           // Must be "Replace" (only supported operation)
+    Text: string;           // Replacement content
+    OldText?: string;       // Optional: specific text to replace within line
 }
 ```
 
-## Edit Operation Types
+## Edit Operation Type
 
-### 1. Insert - Add New Lines
+### Replace - Replace Entire Lines or Text Within Lines
 
-**Purpose**: Insert new content at a specific line position.
-
-**Behavior**:
-- `LineNumber = 1`: Inserts before the first line
-- `LineNumber > total lines`: Appends to end of file  
-- Otherwise: Inserts before the specified line
-
-**Required Fields**: `LineNumber`, `Type`, `Text`
-
-### 2. Delete - Remove Lines
-
-**Purpose**: Delete entire lines from the file.
-
-**Required Fields**: `LineNumber`, `Type`
-
-### 3. Replace - Replace Entire Lines or Text Within Lines
-
-**Purpose**: Replace content in existing lines.
+**Purpose**: Replace content in existing lines with more reliable text-based matching.
 
 **Behavior**:
-- If `OldText` is null: Replace entire line with `Text`
+- If `OldText` is null or empty: Replace entire line with `Text`
 - If `OldText` is provided: Replace only that specific text within the line
 
 **Required Fields**: `LineNumber`, `Type`, `Text`
@@ -70,7 +52,7 @@ interface FileEdit {
 ]
 ```
 
-### Example 2: Insert Multi-line Content
+### Example 2: Replace Multi-line Content
 
 **⚠️ CRITICAL**: Multi-line content must use `\\n` for newlines in JSON!
 
@@ -78,19 +60,19 @@ interface FileEdit {
 [
   {
     "LineNumber": 10,
-    "Type": "Insert",
+    "Type": "Replace",
     "Text": "function calculateSum(a, b) {\\n    return a + b;\\n}"
   }
 ]
 ```
 
-### Example 3: Multiple Operations
+### Example 3: Multiple Replace Operations
 
 ```json
 [
   {
     "LineNumber": 1,
-    "Type": "Insert",
+    "Type": "Replace",
     "Text": "// File header comment"
   },
   {
@@ -100,7 +82,8 @@ interface FileEdit {
   },
   {
     "LineNumber": 20,
-    "Type": "Delete"
+    "Type": "Replace",
+    "Text": "// Updated line content"
   }
 ]
 ```
@@ -118,26 +101,13 @@ interface FileEdit {
 ]
 ```
 
-### Example 5: Replace Section (Multiple Lines)
-
-```json
-[
-  {
-    "LineNumber": 25,
-    "Type": "ReplaceSection",
-    "EndLine": 30,
-    "Text": "// New implementation\\nconst newFunction = () => {\\n    console.log('Updated');\\n};"
-  }
-]
-```
-
-### Example 6: Complex Multi-line with Escaping
+### Example 5: Complex Multi-line Replacement with Escaping
 
 ```json
 [
   {
     "LineNumber": 12,
-    "Type": "Insert",
+    "Type": "Replace",
     "Text": "const config = {\\n    \"apiUrl\": \"https://api.example.com\",\\n    \"timeout\": 5000\\n};"
   }
 ]
@@ -152,7 +122,7 @@ interface FileEdit {
 [
   {
     "LineNumber": 5,
-    "Type": "INSERT",  // ❌ Wrong - should be "Insert"
+    "Type": "REPLACE",  // ❌ Wrong - should be "Replace"
     "Text": "new line"
   }
 ]
@@ -163,7 +133,7 @@ interface FileEdit {
 [
   {
     "LineNumber": 5,
-    "Type": "Insert",  // ✅ Correct enum value
+    "Type": "Replace",  // ✅ Correct enum value
     "Text": "new line"
   }
 ]
@@ -182,12 +152,26 @@ interface FileEdit {
 ]
 ```
 
+### ❌ Error 2: Unescaped Newlines in Multi-line Text
+
+**Bad Example:**
+```json
+[
+  {
+    "LineNumber": 5,
+    "Type": "Replace",
+    "Text": "line1
+line2"  // ❌ Invalid JSON - literal newlines not allowed
+  }
+]
+```
+
 **✅ Correct:**
 ```json
 [
   {
     "LineNumber": 5,
-    "Type": "Insert", 
+    "Type": "Replace", 
     "Text": "line1\\nline2"  // ✅ Escaped newlines
   }
 ]
@@ -200,8 +184,8 @@ interface FileEdit {
 [
   {
     "LineNumber": 5,
-    "Type": "Insert"
-    // ❌ Missing "Text" field required for Insert
+    "Type": "Replace"
+    // ❌ Missing "Text" field required for Replace
   }
 ]
 ```
@@ -211,22 +195,22 @@ interface FileEdit {
 [
   {
     "LineNumber": 5,
-    "Type": "Insert",
+    "Type": "Replace",
     "Text": "new content"  // ✅ Text field provided
   }
 ]
 ```
 
-### ❌ Error 4: Incorrect ReplaceSection Usage
+### ❌ Error 4: Unsupported Operation Type
 
 **Bad Example:**
 ```json
 [
   {
     "LineNumber": 10,
-    "Type": "ReplaceSection",
+    "Type": "Insert",
     "Text": "new content"
-    // ❌ Missing required "EndLine" field
+    // ❌ Insert operations are no longer supported
   }
 ]
 ```
@@ -236,8 +220,7 @@ interface FileEdit {
 [
   {
     "LineNumber": 10,
-    "Type": "ReplaceSection",
-    "EndLine": 15,  // ✅ EndLine specified
+    "Type": "Replace",  // ✅ Only Replace operations are supported
     "Text": "new content"
   }
 ]
@@ -263,7 +246,7 @@ Always test complex edits with `dryRun: true` first:
   "tool": "edit_file",
   "arguments": {
     "path": "src/myfile.js",
-    "editsJson": "[{\"LineNumber\":5,\"Type\":\"Insert\",\"Text\":\"// New comment\"}]",
+    "editsJson": "[{\"LineNumber\":5,\"Type\":\"Replace\",\"Text\":\"// New comment\"}]",
     "dryRun": true
   }
 }
@@ -273,7 +256,7 @@ This will show you a diff preview without making actual changes.
 
 ## Real-World Complete Examples
 
-### Example: Adding Error Handling to JavaScript Function
+### Example: Updating Error Handling in JavaScript Function
 
 **Original File:**
 ```javascript
@@ -288,8 +271,8 @@ function processData(data) {
 [
   {
     "LineNumber": 2,
-    "Type": "Insert",
-    "Text": "    if (!data || !Array.isArray(data)) {\\n        throw new Error('Invalid data provided');\\n    }"
+    "Type": "Replace",
+    "Text": "    if (!data || !Array.isArray(data)) {\\n        throw new Error('Invalid data provided');\\n    }\\n    const result = data.map(item => item.value);"
   }
 ]
 ```
@@ -327,13 +310,8 @@ const config = {
   {
     "LineNumber": 3,
     "Type": "Replace", 
-    "OldText": "3000",
-    "Text": "8080"
-  },
-  {
-    "LineNumber": 3,
-    "Type": "Insert",
-    "Text": "    database: 'mongodb://localhost:27017/myapp',"
+    "OldText": "port: 3000",
+    "Text": "port: 8080,\\n    database: 'mongodb://localhost:27017/myapp'"
   }
 ]
 ```
@@ -349,7 +327,7 @@ const config = {
 
 ## Testing Your Edit Operations
 
-1. **Start Simple**: Test with single-line insertions first
+1. **Start Simple**: Test with single-line replacements first
 2. **Use Dry Run**: Always preview complex changes
 3. **Validate JSON**: Ensure your JSON is properly formatted
 4. **Check Line Numbers**: Verify line numbers are correct (1-based)
@@ -361,10 +339,9 @@ const config = {
 [
   {
     "LineNumber": 1,
-    "Type": "Insert|Delete|Replace|ReplaceSection",
+    "Type": "Replace",
     "Text": "content with \\n for newlines",
-    "OldText": "optional: text to replace within line",
-    "EndLine": "optional: for ReplaceSection only"
+    "OldText": "optional: specific text to replace within line"
   }
 ]
 ```
@@ -373,11 +350,12 @@ const config = {
 
 When generating `editsJson`:
 
-1. ✅ Use proper enum values: `"Insert"`, `"Delete"`, `"Replace"`, `"ReplaceSection"`
+1. ✅ Use only `"Replace"` operation type (other types are not supported)
 2. ✅ Escape newlines as `\\n` in JSON strings
 3. ✅ Escape quotes as `\\"` in JSON strings  
-4. ✅ Include all required fields for each operation type
+4. ✅ Include required fields: `LineNumber`, `Type`, `Text`
 5. ✅ Use 1-based line numbers
 6. ✅ Test with dry run for complex operations
+7. ✅ Use `OldText` for precision when replacing specific text within a line
 
-Following these guidelines will ensure successful file editing operations without JSON parsing errors.
+Following these guidelines will ensure successful file editing operations with reliable Replace-based editing.

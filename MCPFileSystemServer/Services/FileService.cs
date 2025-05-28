@@ -400,9 +400,7 @@ namespace MCPFileSystemServer.Services
             {
                 return new ReadFileResponse { FilePath = path, ErrorMessage = $"Error reading file: {ex.Message}", Lines = Array.Empty<string>() };
             }
-        }
-
-        // Updated EditFileAsync to include SectionReplace functionality
+        }        // Updated EditFileAsync to only support Replace operations
         public async Task<EditResult> EditFileAsync(string path, List<FileEdit> edits, bool dryRun = false)
         {
             string fullPath = GetValidatedFullPath(path);
@@ -413,7 +411,22 @@ namespace MCPFileSystemServer.Services
 
             try
             {
-                var lines = new List<string>(await File.ReadAllLinesAsync(fullPath));
+                // Validate all edits before processing
+                foreach (var edit in edits)
+                {
+                    // Normalize newlines before validation
+                    edit.NormalizeText();
+                    
+                    var validation = edit.Validate();
+                    if (!validation.IsValid)
+                    {
+                        return new EditResult 
+                        { 
+                            Success = false, 
+                            Message = $"Edit validation failed: {validation.GetErrorMessage()}" 
+                        };
+                    }
+                }                var lines = new List<string>(await File.ReadAllLinesAsync(fullPath));
                 int editCount = 0;
                 string originalContentForDiff = string.Empty;
                 if (dryRun)
@@ -427,90 +440,39 @@ namespace MCPFileSystemServer.Services
                     int lineNumber0Based = edit.LineNumber - 1; // Convert to 0-based
                     if (lineNumber0Based < 0) lineNumber0Based = 0;
 
-                    switch (edit.Type)
+                    // Only support Replace operations
+                    if (edit.Type != EditType.Replace)
                     {
-                        case EditType.Insert:
-                            if (lineNumber0Based > lines.Count) lineNumber0Based = lines.Count;
-                            lines.Insert(lineNumber0Based, edit.Text ?? string.Empty);
-                            editCount++;
-                            break;
-                            
-                        case EditType.Delete:
-                            if (lineNumber0Based < lines.Count)
+                        return new EditResult { Success = false, Message = $"Unsupported edit type: {edit.Type}. Only Replace operations are supported." };
+                    }
+
+                    if (lineNumber0Based < lines.Count)
+                    {
+                        // If OldText is specified, try to replace that part of the line with intelligent line ending handling
+                        if (!string.IsNullOrEmpty(edit.OldText))
+                        {
+                            var (success, updatedLine) = TryReplaceWithLineEndingFallback(lines[lineNumber0Based], edit.OldText, edit.Text ?? string.Empty);
+                            if (success)
                             {
-                                lines.RemoveAt(lineNumber0Based);
-                                editCount++;
+                                lines[lineNumber0Based] = updatedLine;
                             }
-                            break;
-                            
-                        case EditType.Replace:
-                            if (lineNumber0Based < lines.Count)
+                            else
                             {
-                                // If OldText is specified, only replace that part of the line
-                                if (!string.IsNullOrEmpty(edit.OldText) && lines[lineNumber0Based].Contains(edit.OldText))
-                                {
-                                    lines[lineNumber0Based] = lines[lineNumber0Based].Replace(edit.OldText, edit.Text ?? string.Empty);
-                                }
-                                else
-                                {
-                                    // Replace the entire line
-                                    lines[lineNumber0Based] = edit.Text ?? string.Empty;
-                                }
-                                editCount++;
+                                // If no match found with any line ending variant, replace the entire line
+                                lines[lineNumber0Based] = edit.Text ?? string.Empty;
                             }
-                            else if (lineNumber0Based == lines.Count) // If replacing a line that doesn't exist, treat as append
-                            {
-                                lines.Add(edit.Text ?? string.Empty);
-                                editCount++;
-                            }
-                            break;
-                            
-                        case EditType.ReplaceSection:
-                            // Handle section replacement
-                            if (edit.EndLine.HasValue && edit.EndLine.Value >= edit.LineNumber)
-                            {
-                                int endLine0Based = edit.EndLine.Value - 1; // Convert to 0-based
-                                
-                                // Ensure we don't go out of bounds
-                                if (lineNumber0Based < lines.Count)
-                                {
-                                    // Ensure endLine is within bounds
-                                    endLine0Based = Math.Min(endLine0Based, lines.Count - 1);
-                                    
-                                    // Calculate how many lines to remove
-                                    int linesToRemove = endLine0Based - lineNumber0Based + 1;
-                                    
-                                    // Remove the lines in the section
-                                    lines.RemoveRange(lineNumber0Based, linesToRemove);
-                                    
-                                    // If there's replacement text, split it into lines and insert
-                                    if (!string.IsNullOrEmpty(edit.Text))
-                                    {
-                                        string[] newLines = edit.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                                        for (int i = 0; i < newLines.Length; i++)
-                                        {
-                                            lines.Insert(lineNumber0Based + i, newLines[i]);
-                                        }
-                                    }
-                                    
-                                    editCount++;
-                                }
-                                else if (lineNumber0Based == lines.Count) // If replacing a section that doesn't exist, treat as append
-                                {
-                                    // If there's replacement text, split it into lines and append
-                                    if (!string.IsNullOrEmpty(edit.Text))
-                                    {
-                                        string[] newLines = edit.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                                        foreach (var line in newLines)
-                                        {
-                                            lines.Add(line);
-                                        }
-                                    }
-                                    
-                                    editCount++;
-                                }
-                            }
-                            break;
+                        }
+                        else
+                        {
+                            // Replace the entire line
+                            lines[lineNumber0Based] = edit.Text ?? string.Empty;
+                        }
+                        editCount++;
+                    }
+                    else if (lineNumber0Based == lines.Count) // If replacing a line that doesn't exist, treat as append
+                    {
+                        lines.Add(edit.Text ?? string.Empty);
+                        editCount++;
                     }
                 }
 
@@ -536,9 +498,7 @@ namespace MCPFileSystemServer.Services
             {
                 return new EditResult { Success = false, Message = $"Error editing file: {ex.Message}" };
             }
-        }
-
-        // Enhanced EditFileAsync with encoding preservation
+        }        // Enhanced EditFileAsync with encoding preservation - only supports Replace operations
         public async Task<EditResult> EditFileAsync(string path, List<FileEdit> edits, bool dryRun = false, bool preserveEncoding = true)
         {
             string fullPath = GetValidatedFullPath(path);
@@ -549,6 +509,23 @@ namespace MCPFileSystemServer.Services
 
             try
             {
+                // Validate all edits before processing
+                foreach (var edit in edits)
+                {
+                    // Normalize newlines before validation
+                    edit.NormalizeText();
+                    
+                    var validation = edit.Validate();
+                    if (!validation.IsValid)
+                    {
+                        return new EditResult 
+                        { 
+                            Success = false, 
+                            Message = $"Edit validation failed: {validation.GetErrorMessage()}" 
+                        };
+                    }
+                }
+
                 // Detect original encoding if preserving
                 FileEncoding originalEncoding = FileEncoding.Utf8NoBom;
                 Encoding encodingToUse = Encoding.UTF8;
@@ -557,9 +534,7 @@ namespace MCPFileSystemServer.Services
                 {
                     originalEncoding = await EncodingUtility.DetectFileEncodingAsync(fullPath);
                     encodingToUse = EncodingUtility.ToSystemEncoding(originalEncoding);
-                }
-
-                var lines = new List<string>(await File.ReadAllLinesAsync(fullPath, encodingToUse));
+                }                var lines = new List<string>(await File.ReadAllLinesAsync(fullPath, encodingToUse));
                 int editCount = 0;
                 string originalContentForDiff = string.Empty;
                 if (dryRun)
@@ -573,90 +548,39 @@ namespace MCPFileSystemServer.Services
                     int lineNumber0Based = edit.LineNumber - 1; // Convert to 0-based
                     if (lineNumber0Based < 0) lineNumber0Based = 0;
 
-                    switch (edit.Type)
+                    // Only support Replace operations
+                    if (edit.Type != EditType.Replace)
                     {
-                        case EditType.Insert:
-                            if (lineNumber0Based > lines.Count) lineNumber0Based = lines.Count;
-                            lines.Insert(lineNumber0Based, edit.Text ?? string.Empty);
-                            editCount++;
-                            break;
-                            
-                        case EditType.Delete:
-                            if (lineNumber0Based < lines.Count)
+                        return new EditResult { Success = false, Message = $"Unsupported edit type: {edit.Type}. Only Replace operations are supported." };
+                    }
+
+                    if (lineNumber0Based < lines.Count)
+                    {
+                        // If OldText is specified, try to replace that part of the line with intelligent line ending handling
+                        if (!string.IsNullOrEmpty(edit.OldText))
+                        {
+                            var (success, updatedLine) = TryReplaceWithLineEndingFallback(lines[lineNumber0Based], edit.OldText, edit.Text ?? string.Empty);
+                            if (success)
                             {
-                                lines.RemoveAt(lineNumber0Based);
-                                editCount++;
+                                lines[lineNumber0Based] = updatedLine;
                             }
-                            break;
-                            
-                        case EditType.Replace:
-                            if (lineNumber0Based < lines.Count)
+                            else
                             {
-                                // If OldText is specified, only replace that part of the line
-                                if (!string.IsNullOrEmpty(edit.OldText) && lines[lineNumber0Based].Contains(edit.OldText))
-                                {
-                                    lines[lineNumber0Based] = lines[lineNumber0Based].Replace(edit.OldText, edit.Text ?? string.Empty);
-                                }
-                                else
-                                {
-                                    // Replace the entire line
-                                    lines[lineNumber0Based] = edit.Text ?? string.Empty;
-                                }
-                                editCount++;
+                                // If no match found with any line ending variant, replace the entire line
+                                lines[lineNumber0Based] = edit.Text ?? string.Empty;
                             }
-                            else if (lineNumber0Based == lines.Count) // If replacing a line that doesn't exist, treat as append
-                            {
-                                lines.Add(edit.Text ?? string.Empty);
-                                editCount++;
-                            }
-                            break;
-                            
-                        case EditType.ReplaceSection:
-                            // Handle section replacement
-                            if (edit.EndLine.HasValue && edit.EndLine.Value >= edit.LineNumber)
-                            {
-                                int endLine0Based = edit.EndLine.Value - 1; // Convert to 0-based
-                                
-                                // Ensure we don't go out of bounds
-                                if (lineNumber0Based < lines.Count)
-                                {
-                                    // Ensure endLine is within bounds
-                                    endLine0Based = Math.Min(endLine0Based, lines.Count - 1);
-                                    
-                                    // Calculate how many lines to remove
-                                    int linesToRemove = endLine0Based - lineNumber0Based + 1;
-                                    
-                                    // Remove the lines in the section
-                                    lines.RemoveRange(lineNumber0Based, linesToRemove);
-                                    
-                                    // If there's replacement text, split it into lines and insert
-                                    if (!string.IsNullOrEmpty(edit.Text))
-                                    {
-                                        string[] newLines = edit.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                                        for (int i = 0; i < newLines.Length; i++)
-                                        {
-                                            lines.Insert(lineNumber0Based + i, newLines[i]);
-                                        }
-                                    }
-                                    
-                                    editCount++;
-                                }
-                                else if (lineNumber0Based == lines.Count) // If replacing a section that doesn't exist, treat as append
-                                {
-                                    // If there's replacement text, split it into lines and append
-                                    if (!string.IsNullOrEmpty(edit.Text))
-                                    {
-                                        string[] newLines = edit.Text.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-                                        foreach (var line in newLines)
-                                        {
-                                            lines.Add(line);
-                                        }
-                                    }
-                                    
-                                    editCount++;
-                                }
-                            }
-                            break;
+                        }
+                        else
+                        {
+                            // Replace the entire line
+                            lines[lineNumber0Based] = edit.Text ?? string.Empty;
+                        }
+                        editCount++;
+                    }
+                    else if (lineNumber0Based == lines.Count) // If replacing a line that doesn't exist, treat as append
+                    {
+                        lines.Add(edit.Text ?? string.Empty);
+                        editCount++;
                     }
                 }
 
@@ -900,14 +824,51 @@ namespace MCPFileSystemServer.Services
         // SearchFilesAsync (renamed from SearchFiles to align with FileTools expectation, and ensure it uses SearchService.SearchFilesAsync)
         public async Task<IEnumerable<FileInfoContract>> SearchFilesAsync(string directoryPath, string pattern, bool respectGitignore, string[]? excludePatterns = null)
         {
-            var filesFoundPaths = await SearchService.SearchFilesAsync(directoryPath, pattern, respectGitignore, excludePatterns);
-
-            var results = new List<FileInfoContract>();
+            var filesFoundPaths = await SearchService.SearchFilesAsync(directoryPath, pattern, respectGitignore, excludePatterns);            var results = new List<FileInfoContract>();
             foreach (var filePath in filesFoundPaths)
             {
                 results.Add(new FileInfoContract { FullName = filePath, Name = Path.GetFileName(filePath), Exists = true }); 
             }
             return results;
+        }
+
+        /// <summary>
+        /// Attempts to replace text in a line with intelligent line ending fallback.
+        /// If the initial match fails, tries different line ending combinations.
+        /// </summary>
+        /// <param name="line">The line to search and replace in</param>
+        /// <param name="oldText">The text to find and replace</param>
+        /// <param name="newText">The replacement text</param>
+        /// <returns>A tuple indicating success and the updated line</returns>
+        private static (bool success, string updatedLine) TryReplaceWithLineEndingFallback(string line, string oldText, string newText)
+        {
+            // First try direct match (already normalized)
+            if (line.Contains(oldText))
+            {
+                return (true, line.Replace(oldText, newText));
+            }
+
+            // Create variants of oldText with different line endings
+            var oldTextVariants = new[]
+            {
+                oldText.Replace("\n", "\r\n"),  // Convert \n to \r\n
+                oldText.Replace("\r\n", "\n"),  // Convert \r\n to \n
+                oldText.Replace("\r", "\n"),    // Convert \r to \n
+                oldText.Replace("\n", "\r"),    // Convert \n to \r
+                oldText.Replace("\r\n", "\r")   // Convert \r\n to \r
+            };
+
+            // Try each variant
+            foreach (var variant in oldTextVariants)
+            {
+                if (variant != oldText && line.Contains(variant))
+                {
+                    return (true, line.Replace(variant, newText));
+                }
+            }
+
+            // No match found with any line ending variant
+            return (false, line);
         }
     }
 }

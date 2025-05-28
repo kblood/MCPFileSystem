@@ -86,16 +86,6 @@ The `edit_file` tool is the most powerful feature of MCPFileSystem. For complete
 
 ### **Quick Edit Examples**
 
-#### Simple Insert
-```json
-[{"LineNumber": 5, "Type": "Insert", "Text": "// New comment"}]
-```
-
-#### Multi-line Insert
-```json
-[{"LineNumber": 10, "Type": "Insert", "Text": "function test() {\\n    console.log('Hello');\\n}"}]
-```
-
 #### Replace Entire Line
 ```json
 [{"LineNumber": 15, "Type": "Replace", "Text": "const maxRetries = 5;"}]
@@ -106,18 +96,13 @@ The `edit_file` tool is the most powerful feature of MCPFileSystem. For complete
 [{"LineNumber": 8, "Type": "Replace", "OldText": "localhost", "Text": "production.example.com"}]
 ```
 
-#### Delete Line
+#### Multi-line Replace
 ```json
-[{"LineNumber": 20, "Type": "Delete"}]
-```
-
-#### Replace Section (Multiple Lines)
-```json
-[{"LineNumber": 25, "Type": "ReplaceSection", "EndLine": 30, "Text": "// New section\\nconst updated = true;"}]
+[{"LineNumber": 10, "Type": "Replace", "Text": "function test() {\\n    console.log('Hello');\\n}"}]
 ```
 
 ### **⚠️ Critical JSON Rules**
-1. **Use proper enum values**: `"Insert"`, `"Delete"`, `"Replace"`, `"ReplaceSection"`
+1. **Use proper Type value**: Only `"Replace"` is supported 
 2. **Escape newlines**: Use `\\n` for multi-line content
 3. **Escape quotes**: Use `\\"` for literal quotes in text
 4. **1-based line numbers**: Line numbering starts at 1
@@ -127,22 +112,22 @@ The `edit_file` tool is the most powerful feature of MCPFileSystem. For complete
 
 ❌ **Wrong enum values** (causes JSON parsing errors):
 ```json
-[{"LineNumber": 5, "Type": "INSERT", "Text": "new line"}]  // ❌ Wrong
+[{"LineNumber": 5, "Type": "REPLACE", "Text": "new line"}]  // ❌ Wrong
 ```
 
 ✅ **Correct enum values**:
 ```json
-[{"LineNumber": 5, "Type": "Insert", "Text": "new line"}]  // ✅ Correct
+[{"LineNumber": 5, "Type": "Replace", "Text": "new line"}]  // ✅ Correct
 ```
 
 ❌ **Incorrect newline handling** (JSON syntax error):
 ```json
-[{"LineNumber": 5, "Type": "Insert", "Text": "line1\nline2"}]  // ❌ Wrong
+[{"LineNumber": 5, "Type": "Replace", "Text": "line1\nline2"}]  // ❌ Wrong
 ```
 
 ✅ **Proper newline escaping**:
 ```json
-[{"LineNumber": 5, "Type": "Insert", "Text": "line1\\nline2"}]  // ✅ Correct
+[{"LineNumber": 5, "Type": "Replace", "Text": "line1\\nline2"}]  // ✅ Correct
 ```
 
 ## Configuration for Claude Desktop
@@ -206,7 +191,7 @@ dotnet test
 If you encounter errors with the `edit_file` tool:
 
 1. **Check JSON syntax**: Validate your JSON using a JSON validator
-2. **Verify enum values**: Use exact enum values (`Insert`, not `INSERT`)
+2. **Verify enum values**: Use exact enum value (`Replace` only)
 3. **Test line numbers**: Ensure line numbers exist in the target file
 4. **Use dry-run**: Preview changes with `"dryRun": true`
 5. **Check escaping**: Ensure proper escaping of quotes and newlines
