@@ -400,7 +400,7 @@ namespace MCPFileSystemServer.Services
             {
                 return new ReadFileResponse { FilePath = path, ErrorMessage = $"Error reading file: {ex.Message}", Lines = Array.Empty<string>() };
             }
-        }        // Updated EditFileAsync to only support Replace operations
+        }        // Updated EditFileAsync to only support simple text replacement
         public async Task<EditResult> EditFileAsync(string path, List<FileEdit> edits, bool dryRun = false)
         {
             string fullPath = GetValidatedFullPath(path);
@@ -414,83 +414,49 @@ namespace MCPFileSystemServer.Services
                 // Validate all edits before processing
                 foreach (var edit in edits)
                 {
-                    // Normalize newlines before validation
                     edit.NormalizeText();
-                    
                     var validation = edit.Validate();
                     if (!validation.IsValid)
                     {
-                        return new EditResult 
-                        { 
-                            Success = false, 
-                            Message = $"Edit validation failed: {validation.GetErrorMessage()}" 
+                        return new EditResult
+                        {
+                            Success = false,
+                            Message = $"Edit validation failed: {validation.GetErrorMessage()}"
                         };
                     }
-                }                var lines = new List<string>(await File.ReadAllLinesAsync(fullPath));
+                }
+
+                string content = await File.ReadAllTextAsync(fullPath);
+                string originalContent = content;
                 int editCount = 0;
-                string originalContentForDiff = string.Empty;
-                if (dryRun)
+
+                foreach (var edit in edits)
                 {
-                    originalContentForDiff = string.Join(Environment.NewLine, lines);
-                }
-
-                // Process edits in order by line number to ensure predictable results
-                foreach (var edit in edits.OrderBy(e => e.LineNumber))
-                {
-                    int lineNumber0Based = edit.LineNumber - 1; // Convert to 0-based
-                    if (lineNumber0Based < 0) lineNumber0Based = 0;
-
-                    // Only support Replace operations
-                    if (edit.Type != EditType.Replace)
+                    if (string.IsNullOrEmpty(edit.OldText)) continue;
+                    int idx = content.IndexOf(edit.OldText);
+                    if (idx >= 0)
                     {
-                        return new EditResult { Success = false, Message = $"Unsupported edit type: {edit.Type}. Only Replace operations are supported." };
-                    }
-
-                    if (lineNumber0Based < lines.Count)
-                    {
-                        // If OldText is specified, try to replace that part of the line with intelligent line ending handling
-                        if (!string.IsNullOrEmpty(edit.OldText))
-                        {
-                            var (success, updatedLine) = TryReplaceWithLineEndingFallback(lines[lineNumber0Based], edit.OldText, edit.Text ?? string.Empty);
-                            if (success)
-                            {
-                                lines[lineNumber0Based] = updatedLine;
-                            }
-                            else
-                            {
-                                // If no match found with any line ending variant, replace the entire line
-                                lines[lineNumber0Based] = edit.Text ?? string.Empty;
-                            }
-                        }
-                        else
-                        {
-                            // Replace the entire line
-                            lines[lineNumber0Based] = edit.Text ?? string.Empty;
-                        }
-                        editCount++;
-                    }
-                    else if (lineNumber0Based == lines.Count) // If replacing a line that doesn't exist, treat as append
-                    {
-                        lines.Add(edit.Text ?? string.Empty);
+                        content = content.Remove(idx, edit.OldText.Length).Insert(idx, edit.Text ?? string.Empty);
                         editCount++;
                     }
                 }
 
                 if (dryRun)
                 {
-                    string newContentForDiff = string.Join(Environment.NewLine, lines);
-                    // Simple diff for illustration, a proper diff library would be better.
-                    string diff = $"--- Original\n+++ Modified\n"; // Placeholder for actual diff
-                    if (originalContentForDiff != newContentForDiff) {
-                         diff += $"-{originalContentForDiff.Replace(Environment.NewLine, "\n-")}\n+{newContentForDiff.Replace(Environment.NewLine, "\n+")}";
-                    } else {
+                    string diff = $"--- Original\n+++ Modified\n";
+                    if (originalContent != content)
+                    {
+                        diff += $"-{originalContent.Replace(Environment.NewLine, "\n-")}\n+{content.Replace(Environment.NewLine, "\n+")}";
+                    }
+                    else
+                    {
                         diff += "No changes.";
                     }
                     return new EditResult { Success = true, Message = "Dry run completed.", Diff = diff, EditCount = editCount };
                 }
                 else
                 {
-                    await File.WriteAllLinesAsync(fullPath, lines);
+                    await File.WriteAllTextAsync(fullPath, content);
                     return new EditResult { Success = true, Message = "File edited successfully.", NewFileSHA = await ComputeFileSHAAsync(fullPath), EditCount = editCount };
                 }
             }
@@ -512,9 +478,7 @@ namespace MCPFileSystemServer.Services
                 // Validate all edits before processing
                 foreach (var edit in edits)
                 {
-                    // Normalize newlines before validation
                     edit.NormalizeText();
-                    
                     var validation = edit.Validate();
                     if (!validation.IsValid)
                     {
@@ -534,63 +498,27 @@ namespace MCPFileSystemServer.Services
                 {
                     originalEncoding = await EncodingUtility.DetectFileEncodingAsync(fullPath);
                     encodingToUse = EncodingUtility.ToSystemEncoding(originalEncoding);
-                }                var lines = new List<string>(await File.ReadAllLinesAsync(fullPath, encodingToUse));
+                }
+                string content = await File.ReadAllTextAsync(fullPath, encodingToUse);
+                string originalContent = content;
                 int editCount = 0;
-                string originalContentForDiff = string.Empty;
-                if (dryRun)
+
+                foreach (var edit in edits)
                 {
-                    originalContentForDiff = string.Join(Environment.NewLine, lines);
-                }
-
-                // Process edits in order by line number to ensure predictable results
-                foreach (var edit in edits.OrderBy(e => e.LineNumber))
-                {
-                    int lineNumber0Based = edit.LineNumber - 1; // Convert to 0-based
-                    if (lineNumber0Based < 0) lineNumber0Based = 0;
-
-                    // Only support Replace operations
-                    if (edit.Type != EditType.Replace)
+                    if (string.IsNullOrEmpty(edit.OldText)) continue;
+                    int idx = content.IndexOf(edit.OldText);
+                    if (idx >= 0)
                     {
-                        return new EditResult { Success = false, Message = $"Unsupported edit type: {edit.Type}. Only Replace operations are supported." };
-                    }
-
-                    if (lineNumber0Based < lines.Count)
-                    {
-                        // If OldText is specified, try to replace that part of the line with intelligent line ending handling
-                        if (!string.IsNullOrEmpty(edit.OldText))
-                        {
-                            var (success, updatedLine) = TryReplaceWithLineEndingFallback(lines[lineNumber0Based], edit.OldText, edit.Text ?? string.Empty);
-                            if (success)
-                            {
-                                lines[lineNumber0Based] = updatedLine;
-                            }
-                            else
-                            {
-                                // If no match found with any line ending variant, replace the entire line
-                                lines[lineNumber0Based] = edit.Text ?? string.Empty;
-                            }
-                        }
-                        else
-                        {
-                            // Replace the entire line
-                            lines[lineNumber0Based] = edit.Text ?? string.Empty;
-                        }
-                        editCount++;
-                    }
-                    else if (lineNumber0Based == lines.Count) // If replacing a line that doesn't exist, treat as append
-                    {
-                        lines.Add(edit.Text ?? string.Empty);
+                        content = content.Remove(idx, edit.OldText.Length).Insert(idx, edit.Text ?? string.Empty);
                         editCount++;
                     }
                 }
 
                 if (dryRun)
                 {
-                    string newContentForDiff = string.Join(Environment.NewLine, lines);
-                    // Simple diff for illustration, a proper diff library would be better.
-                    string diff = $"--- Original\n+++ Modified\n"; // Placeholder for actual diff
-                    if (originalContentForDiff != newContentForDiff) {
-                         diff += $"-{originalContentForDiff.Replace(Environment.NewLine, "\n-")}\n+{newContentForDiff.Replace(Environment.NewLine, "\n+")}";
+                    string diff = $"--- Original\n+++ Modified\n";
+                    if (originalContent != content) {
+                        diff += $"-{originalContent.Replace(Environment.NewLine, "\n-")}\n+{content.Replace(Environment.NewLine, "\n+")}";
                     } else {
                         diff += "No changes.";
                     }
@@ -604,7 +532,7 @@ namespace MCPFileSystemServer.Services
                 }
                 else
                 {
-                    await File.WriteAllLinesAsync(fullPath, lines, encodingToUse);
+                    await File.WriteAllTextAsync(fullPath, content, encodingToUse);
                     return new EditResult { 
                         Success = true, 
                         Message = "File edited successfully.", 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Text.Json;
 using System.Linq;
+using MCPFileSystem.Contracts;
 
 namespace MCPFileSystem.Client
 {
@@ -29,13 +30,6 @@ namespace MCPFileSystem.Client
                 if ((op.Type == "INSERT" || op.Type == "REPLACE") && string.IsNullOrEmpty(op.Text))
                 {
                     Console.WriteLine($"Error: {op.Type} operation at line {op.LineNumber} has no Text content");
-                    return false;
-                }
-
-                // Validate line number
-                if (op.LineNumber <= 0)
-                {
-                    Console.WriteLine($"Error: Invalid LineNumber {op.LineNumber} (must be 1-based)");
                     return false;
                 }
 
@@ -124,6 +118,28 @@ namespace MCPFileSystem.Client
             }
 
             return JsonSerializer.Serialize(operations);
+        }
+
+        /// <summary>
+        /// Validates a list of FileEdit operations for simple text replacement.
+        /// </summary>
+        public static List<string> ValidateEdits(List<FileEdit> edits)
+        {
+            var errors = new List<string>();
+            if (edits == null || edits.Count == 0)
+            {
+                errors.Add("No edit operations provided.");
+                return errors;
+            }
+            foreach (var edit in edits)
+            {
+                var validation = edit.Validate();
+                if (!validation.IsValid)
+                {
+                    errors.AddRange(validation.Errors);
+                }
+            }
+            return errors;
         }
     }
 }

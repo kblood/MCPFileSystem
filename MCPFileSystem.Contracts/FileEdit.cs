@@ -1,21 +1,15 @@
 ﻿namespace MCPFileSystem.Contracts;
 
 /// <summary>
-/// Represents a Replace edit operation to be applied to a file.
-/// Only Replace operations are supported for reliable text editing.
+/// Represents a simple text replacement operation to be applied to a file.
+/// Only global text replacements are supported for reliable editing.
 /// </summary>
 public class FileEdit
 {
     /// <summary>
-    /// The 1-based line number where the replace operation should occur.
-    /// For appending to the end of the file, use a number greater than the last line number.
+    /// The text to find in the file. The first occurrence will be replaced.
     /// </summary>
-    public int LineNumber { get; set; }
-
-    /// <summary>
-    /// The type of edit operation. Must be Replace.
-    /// </summary>
-    public EditType Type { get; set; } = EditType.Replace;
+    public string? OldText { get; set; }
 
     /// <summary>
     /// The text to replace with.
@@ -26,13 +20,6 @@ public class FileEdit
     public string? Text { get; set; }
 
     /// <summary>
-    /// The text to find on the specified LineNumber.
-    /// If null, the entire line specified by LineNumber is replaced with Text.
-    /// If provided, only this specific string within the line is replaced.
-    /// </summary>
-    public string? OldText { get; set; }
-
-    /// <summary>
     /// Validates this FileEdit instance for common issues.
     /// </summary>
     /// <returns>A validation result with any errors found.</returns>
@@ -40,19 +27,14 @@ public class FileEdit
     {
         var errors = new List<string>();
 
-        if (LineNumber <= 0)
+        if (string.IsNullOrEmpty(OldText))
         {
-            errors.Add($"LineNumber must be 1 or greater (got {LineNumber})");
-        }
-
-        if (Type != EditType.Replace)
-        {
-            errors.Add($"Only Replace operations are supported (got {Type})");
+            errors.Add("OldText is required for text replacement");
         }
 
         if (string.IsNullOrEmpty(Text))
         {
-            errors.Add("Text is required for Replace operations");
+            errors.Add("Text is required for text replacement");
         }
 
         // Check for common JSON formatting issues in Text
@@ -73,7 +55,7 @@ public class FileEdit
     }
 
     /// <summary>
-    /// Normalizes the Text property by converting different newline formats to \n
+    /// Normalizes the Text and OldText properties by converting different newline formats to \n
     /// </summary>
     public void NormalizeText()
     {
@@ -81,26 +63,11 @@ public class FileEdit
         {
             Text = Text.Replace("\r\n", "\n").Replace("\r", "\n");
         }
-        
         if (!string.IsNullOrEmpty(OldText))
         {
             OldText = OldText.Replace("\r\n", "\n").Replace("\r", "\n");
         }
     }
-}
-
-/// <summary>
-/// Defines the type of edit operation.
-/// Only Replace operations are supported for reliable text editing.
-/// </summary>
-public enum EditType
-{
-    /// <summary>
-    /// Replace an entire line or specific text within a line.
-    /// If OldText is null, the entire LineNumber is replaced with Text.
-    /// If OldText is provided, only that part of the line is replaced with Text.
-    /// </summary>
-    Replace = 2  // Keep the same numeric value for backward compatibility
 }
 
 /// <summary>

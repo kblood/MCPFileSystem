@@ -1,44 +1,8 @@
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Collections.Generic;
 using System.Linq;
 
 namespace MCPFileSystem.Contracts;
-
-/// <summary>
-/// Custom JSON converter for EditType enum that handles string values correctly
-/// </summary>
-public class EditTypeConverter : JsonConverter<EditType>
-{
-    public override EditType Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-    {
-        if (reader.TokenType == JsonTokenType.String)
-        {
-            var value = reader.GetString();
-            if (string.Equals(value, "Replace", StringComparison.OrdinalIgnoreCase))
-            {
-                return EditType.Replace;
-            }
-            throw new JsonException($"Invalid EditType value: '{value}'. Only 'Replace' is supported.");
-        }
-        else if (reader.TokenType == JsonTokenType.Number)
-        {
-            var value = reader.GetInt32();
-            if (value == 2) // Replace = 2
-            {
-                return EditType.Replace;
-            }
-            throw new JsonException($"Invalid EditType numeric value: {value}. Only 2 (Replace) is supported.");
-        }
-
-        throw new JsonException($"Unexpected token type for EditType: {reader.TokenType}");
-    }
-
-    public override void Write(Utf8JsonWriter writer, EditType value, JsonSerializerOptions options)
-    {
-        writer.WriteStringValue(value.ToString());
-    }
-}
 
 /// <summary>
 /// Helper class for serializing and deserializing FileEdit objects with proper validation
@@ -48,7 +12,6 @@ public static class FileEditJsonHelper
     private static readonly JsonSerializerOptions DefaultOptions = new()
     {
         PropertyNameCaseInsensitive = true,
-        Converters = { new EditTypeConverter() },
         WriteIndented = true
     };
 
@@ -70,7 +33,7 @@ public static class FileEditJsonHelper
         try
         {
             var edits = JsonSerializer.Deserialize<List<FileEdit>>(json, DefaultOptions);
-              if (edits == null)
+            if (edits == null)
             {
                 errors.Add("Deserialized edits list is null");
                 return (null, errors);
@@ -83,14 +46,16 @@ public static class FileEditJsonHelper
             }
 
             // Validate each edit and normalize text
+            int idx = 0;
             foreach (var edit in edits)
             {
                 edit.NormalizeText();
                 var validation = edit.Validate();
                 if (!validation.IsValid)
                 {
-                    errors.AddRange(validation.Errors.Select(e => $"Edit at line {edit.LineNumber}: {e}"));
+                    errors.AddRange(validation.Errors.Select(e => $"Edit #{idx + 1}: {e}"));
                 }
+                idx++;
             }
 
             return (edits, errors);
@@ -98,7 +63,6 @@ public static class FileEditJsonHelper
         catch (JsonException ex)
         {
             errors.Add($"JSON parsing error: {ex.Message}");
-            
             // Provide helpful hints for common JSON errors
             if (ex.Message.Contains("Unterminated string"))
             {
@@ -108,11 +72,6 @@ public static class FileEditJsonHelper
             {
                 errors.Add("Hint: Check for unescaped quotes. Use \\\" for literal quotes in JSON strings.");
             }
-            else if (ex.Message.Contains("EditType"))
-            {
-                errors.Add("Hint: EditType must be \"Replace\" (case-sensitive string value).");
-            }
-
             return (null, errors);
         }
     }
@@ -137,19 +96,15 @@ public static class FileEditJsonHelper
         {
             new()
             {
-                LineNumber = 1,
-                Type = EditType.Replace,
-                Text = "// Single line replacement"
+                OldText = "console.log('old message');",
+                Text = "console.log('new message');"
             },
             new()
             {
-                LineNumber = 5,
-                Type = EditType.Replace,
-                Text = "function example() {\\n    console.log(\"Multi-line with escaped quotes\");\\n}",
-                OldText = "old function content"
+                OldText = "function test() {\\n    // old code\\n}",
+                Text = "function test() {\\n    // new code\\n}"
             }
         };
-
         return SerializeEdits(example);
     }
 }

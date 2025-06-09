@@ -77,36 +77,21 @@ Command line options:
 
 ## 📝 File Editing Documentation
 
-The `edit_file` tool is the most powerful feature of MCPFileSystem. For complete usage instructions with JSON examples:
+### **Quick Edit Example**
 
-### **📚 Essential Reading**
-- **[EDIT_FILE_COMPLETE_GUIDE.md](./EDIT_FILE_COMPLETE_GUIDE.md)** - **Complete guide with correct JSON examples**
-- [EditFileTool_Documentation.md](./EditFileTool_Documentation.md) - Technical implementation details
-- [LineEditOperationsExamples.md](./LineEditOperationsExamples.md) - C# client examples
-
-### **Quick Edit Examples**
-
-#### Replace Entire Line
+#### Replace Text
 ```json
-[{"LineNumber": 15, "Type": "Replace", "Text": "const maxRetries = 5;"}]
+[{"OldText": "console.log('old message');", "Text": "console.log('new message');"}]
 ```
 
-#### Replace Text Within Line
-```json
-[{"LineNumber": 8, "Type": "Replace", "OldText": "localhost", "Text": "production.example.com"}]
-```
-
-#### Multi-line Replace
-```json
-[{"LineNumber": 10, "Type": "Replace", "Text": "function test() {\\n    console.log('Hello');\\n}"}]
-```
+- Only `OldText` and `Text` are supported for each edit.
+- No line numbers or edit types are required or supported.
+- Only the first occurrence of `OldText` in the file will be replaced.
 
 ### **⚠️ Critical JSON Rules**
-1. **Use proper Type value**: Only `"Replace"` is supported 
-2. **Escape newlines**: Use `\\n` for multi-line content
-3. **Escape quotes**: Use `\\"` for literal quotes in text
-4. **1-based line numbers**: Line numbering starts at 1
-5. **Test with dry-run**: Use `"dryRun": true` for complex operations
+1. **Escape newlines**: Use `\\n` for multi-line content
+2. **Escape quotes**: Use `\\"` for literal quotes in text
+3. **Test with dry-run**: Use `"dryRun": true` for complex operations
 
 ### **Common Errors and Solutions**
 

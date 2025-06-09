@@ -127,7 +127,7 @@ public static class EncodingTests
         // Perform edit with encoding preservation
         var edits = new List<FileEdit>
         {
-            new FileEdit { LineNumber = 2, Type = EditType.Replace, Text = "Modified line 2" }
+            new FileEdit { Text = "Modified line 2", OldText = "Original line 2" }
         };
         
         var editResult = await fileService.EditFileAsync(filePath, edits, dryRun: false, preserveEncoding: true);
